@@ -269,7 +269,9 @@ step_04_apt_update() {
 }
 
 step_05_deps() {
-  lxc_exec "export DEBIAN_FRONTEND=noninteractive && apt install -y curl unzip python3 python3-pip python3-psycopg2 python3-pytest postgresql apparmor apparmor-utils"
+  lxc_exec "export DEBIAN_FRONTEND=noninteractive && apt install -y curl unzip python3 python3-pip python3-psycopg2 python3-pytest postgresql apparmor apparmor-utils locales"
+  lxc_exec "grep -q '^en_US.UTF-8' /etc/locale.gen 2>/dev/null || echo 'en_US.UTF-8 UTF-8' >> /etc/locale.gen"
+  lxc_exec "locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8"
 }
 
 run_step STEP_01 "Crear LXC en Proxmox"                       step_01_create_lxc
@@ -289,6 +291,12 @@ step_06_user_dirs() {
 }
 
 step_07_postgres_relocate() {
+  # Asegurar locale en_US.UTF-8 disponible (necesario para pg_createcluster).
+  # Idempotente: si STEP_05 ya lo instaló, esto es un no-op.
+  lxc_exec "export DEBIAN_FRONTEND=noninteractive && apt install -y locales 2>/dev/null || true"
+  lxc_exec "grep -q '^en_US.UTF-8' /etc/locale.gen 2>/dev/null || echo 'en_US.UTF-8 UTF-8' >> /etc/locale.gen"
+  lxc_exec "locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8"
+
   lxc_exec "usermod -aG ${AGENT_NAME} postgres"
   lxc_exec "chmod 750 /home/${AGENT_NAME}/data"
   lxc_exec "mkdir -p /home/${AGENT_NAME}/data/postgresql"
