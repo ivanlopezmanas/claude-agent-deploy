@@ -325,9 +325,19 @@ step_07_postgres_relocate() {
       rm -rf /home/${AGENT_NAME}/data/postgresql/*
       pg_createcluster -d /home/${AGENT_NAME}/data/postgresql \${PG_VERSION} main
       systemctl start postgresql
+      # postgresql.service es un oneshot wrapper en Debian: termina inmediatamente
+      # y los clusters corren como postgresql@<ver>-main.service. Verificamos el cluster real.
+      sleep 2
+      if ! pg_lsclusters 2>/dev/null | grep -q '\bmain\b.*online'; then
+        echo '[ERROR] El cluster main no quedó online tras systemctl start postgresql'
+        pg_lsclusters 2>/dev/null || true
+        journalctl -u \"postgresql@\${PG_VERSION}-main\" -n 20 --no-pager 2>/dev/null || true
+        exit 1
+      fi
     fi
   "
-  lxc_exec "systemctl is-active postgresql"
+  # Verificar con pg_lsclusters (no systemctl is-active, que es un oneshot en Debian)
+  lxc_exec "pg_lsclusters 2>/dev/null | grep -q '\bmain\b.*online' && echo 'Cluster online OK'"
 }
 
 step_08_init_db() {
