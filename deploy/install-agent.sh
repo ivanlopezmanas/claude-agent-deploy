@@ -72,6 +72,8 @@ manual_box() {
 # SECCIÓN 1 — Recogida de parámetros
 # =============================================================================
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 log_info ""
 log_info "============================================================"
 log_info "  install-agent.sh — Provisioning de un agente Claude Code"
@@ -157,7 +159,7 @@ ask_secret TELEGRAM_BOT_TOKEN "Bot token de Telegram (oculto)"
 ask TELEGRAM_CHAT_ID  "Chat ID del propietario"         ""
 ask OWNER_NAME        "Nombre del propietario (para la BD)"  ""
 read -rp "Clave pública SSH del propietario (opcional, ENTER para omitir): " OWNER_SSH_KEY
-ask DEPLOY_SRC        "Directorio con los templates"    "/root/docs/claude-code-os/new/deploy"
+ask DEPLOY_SRC        "Directorio con los templates"    "${SCRIPT_DIR}"
 ask PROXMOX_TEMPLATE  "Template LXC"                    "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
 
 # Validar que el directorio de templates existe
@@ -361,9 +363,9 @@ step_08_init_db() {
   # Copiar al LXC y ejecutar
   pct push "${VMID}" "${tmp_sql}" /tmp/init-db.sql --perms 600
   lxc_exec "chown postgres:postgres /tmp/init-db.sql"
-  lxc_exec "sudo -u postgres psql -v ON_ERROR_STOP=1 -f /tmp/init-db.sql"
+  lxc_exec "runuser -u postgres -- psql -v ON_ERROR_STOP=1 -f /tmp/init-db.sql"
   # Verificar tablas
-  lxc_exec "sudo -u postgres psql -d agents -c '\\dt'"
+  lxc_exec "runuser -u postgres -- psql -d agents -c '\\dt'"
   # Limpiar el SQL con el password en claro (host y LXC)
   rm -f "${tmp_sql}"
   lxc_exec "rm -f /tmp/init-db.sql"
@@ -397,7 +399,8 @@ step_10_bun() {
 step_11_mcp_postgres() {
   lxc_exec "
     set -e
-    NPM_CONFIG_PREFIX=/home/${AGENT_NAME}/apps /home/${AGENT_NAME}/apps/bin/npm install -g @modelcontextprotocol/server-postgres
+    export PATH=/home/${AGENT_NAME}/apps/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    NPM_CONFIG_PREFIX=/home/${AGENT_NAME}/apps npm install -g @modelcontextprotocol/server-postgres
     chown -R ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}/apps
     ls /home/${AGENT_NAME}/apps/bin/mcp-server-postgres
   "
