@@ -1,0 +1,28 @@
+# /etc/systemd/system/claude-telegram.service
+# Servicio principal de <Agent>: sesión Claude Code continua con el plugin de Telegram.
+[Unit]
+Description=Claude Code Telegram Channel
+After=network-online.target
+Wants=network-online.target
+# StartLimit* van en [Unit], no en [Service] (systemd >= v229)
+StartLimitIntervalSec=120
+StartLimitBurst=4
+
+[Service]
+Type=simple
+User=<agent>
+WorkingDirectory=/home/<agent>/claude
+Environment=HOME=/home/<agent>/claude
+Environment=PATH=/home/<agent>/apps/bin:/home/<agent>/claude/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=<AGENT>_CONTEXT=main
+EnvironmentFile=/etc/<agent>/secrets.env
+ExecStartPre=/home/<agent>/workspace/scripts/lib/<agent>-patch-telegram-plugin.sh
+ExecStartPre=/usr/bin/python3 /home/<agent>/workspace/scripts/lib/<agent>-register-commands.py
+ExecStart=/home/<agent>/workspace/scripts/lib/claude-telegram-start.sh
+Restart=on-failure
+RestartSec=10
+MemoryHigh=4G
+MemoryMax=4.5G
+
+[Install]
+WantedBy=multi-user.target

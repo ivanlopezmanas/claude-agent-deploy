@@ -1,0 +1,19 @@
+# /etc/systemd/system/heartbeat.service
+# Sesión efímera claude --print que reclama y procesa los items del inbox.
+[Unit]
+Description=<Agent> heartbeat job
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=<agent>
+WorkingDirectory=/home/<agent>/claude
+Environment=HOME=/home/<agent>/claude
+Environment=PATH=/home/<agent>/apps/bin:/home/<agent>/claude/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=<AGENT>_CONTEXT=heartbeat
+EnvironmentFile=/etc/<agent>/secrets.env
+TimeoutStartSec=4min
+# --strict-mcp-config es obligatorio: la sesión efímera NO debe heredar el plugin
+# de Telegram (evita la colisión de polling con la sesión principal).
+ExecStart=/home/<agent>/claude/.local/bin/claude --print --strict-mcp-config \
+  --input-file /home/<agent>/workspace/scripts/lib/prompts/heartbeat.md

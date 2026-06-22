@@ -1,0 +1,7 @@
+# /etc/sudoers.d/<agent>
+# chmod 440 /etc/sudoers.d/<agent>  &&  visudo -cf /etc/sudoers.d/<agent>
+#
+# IMPORTANTE: las líneas de continuación NO deben ir indentadas (sudoers no admite
+# espacios al inicio). Sin comodines en rutas de escritura, sin 'tee'. El agente
+# solo opera sobre unidades ya existentes y con nombre fijo.
+<agent> ALL=(root) NOPASSWD: /usr/bin/systemctl restart claude-telegram.service, /usr/bin/systemctl start heartbeat.timer, /usr/bin/systemctl stop heartbeat.timer, /usr/bin/systemctl daemon-reload

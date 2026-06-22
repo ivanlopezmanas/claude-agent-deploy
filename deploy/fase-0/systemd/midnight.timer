@@ -1,0 +1,12 @@
+# /etc/systemd/system/midnight.timer
+# Timer de calendario: materializa el día y reconcilia core_task a las 00:00.
+[Unit]
+Description=<Agent> midnight job
+
+[Timer]
+OnCalendar=*-*-* 00:00:00
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

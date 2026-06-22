@@ -1,0 +1,14 @@
+# /etc/systemd/system/midnight.service
+# Job de medianoche: planning del día siguiente en el inbox + reconciliación de core_task.
+[Unit]
+Description=<Agent> midnight planning job
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=<agent>
+WorkingDirectory=/home/<agent>/claude
+Environment=HOME=/home/<agent>/claude
+Environment=PATH=/home/<agent>/apps/bin:/home/<agent>/claude/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=/etc/<agent>/secrets.env
+ExecStart=/usr/bin/python3 /home/<agent>/workspace/scripts/lib/midnight.py
