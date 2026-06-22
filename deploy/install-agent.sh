@@ -303,7 +303,13 @@ step_07_postgres_relocate() {
   lxc_exec "chown postgres:postgres /home/${AGENT_NAME}/data/postgresql"
   lxc_exec "
     set -e
-    PG_VERSION=\$(ls /etc/postgresql/ | head -1)
+    # Detectar versión desde los binarios instalados (robusto: no desaparece con pg_dropcluster)
+    PG_VERSION=\$(ls /usr/lib/postgresql/ | grep -E '^[0-9]+$' | sort -n | tail -1)
+    if [[ -z \"\${PG_VERSION}\" ]]; then
+      echo '[ERROR] No se encontró versión de PostgreSQL instalada en /usr/lib/postgresql/'
+      exit 1
+    fi
+    echo "PostgreSQL versión detectada: \${PG_VERSION}"
     # Idempotencia: si el cluster ya apunta al datadir correcto, solo asegurar que esté up
     CURRENT_DATADIR=\$(pg_lsclusters 2>/dev/null | awk \"/^\${PG_VERSION}[[:space:]].*main/ {print \\\$6}\")
     if [[ \"\${CURRENT_DATADIR}\" == '/home/${AGENT_NAME}/data/postgresql' ]]; then
