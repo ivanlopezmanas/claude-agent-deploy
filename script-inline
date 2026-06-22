@@ -1,0 +1,1 @@
+bash <(curl -fsSL https://raw.githubusercontent.com/ivanlopezmanas/claude-agent-deploy/main/bootstrap.sh)
