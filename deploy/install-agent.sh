@@ -13,6 +13,8 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # =============================================================================
 # SECCIÓN 0 — Cabecera y utilidades
 # =============================================================================
@@ -157,7 +159,7 @@ ask_secret TELEGRAM_BOT_TOKEN "Bot token de Telegram (oculto)"
 ask TELEGRAM_CHAT_ID  "Chat ID del propietario"         ""
 ask OWNER_NAME        "Nombre del propietario (para la BD)"  ""
 read -rp "Clave pública SSH del propietario (opcional, ENTER para omitir): " OWNER_SSH_KEY
-ask DEPLOY_SRC        "Directorio con los templates"    "/root/docs/claude-code-os/new/deploy"
+ask DEPLOY_SRC        "Directorio con los templates"    "${SCRIPT_DIR}"
 ask PROXMOX_TEMPLATE  "Template LXC"                    "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
 
 # Validar que el directorio de templates existe
