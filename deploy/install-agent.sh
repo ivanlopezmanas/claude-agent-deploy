@@ -789,6 +789,7 @@ El servicio ya está corriendo y el bot espera el pairing. Pasos:
    ${GREEN}pct exec ${VMID} -- systemctl stop claude-telegram.service${RESET}
 
    ${GREEN}pct exec ${VMID} -- su -s /bin/bash ${AGENT_NAME} -c '\\
+     set -a; source /etc/${AGENT_NAME}/secrets.env; set +a; \\
      export HOME=/home/${AGENT_NAME}/claude; \\
      export PATH=/home/${AGENT_NAME}/apps/bin:/home/${AGENT_NAME}/claude/.local/bin:/usr/local/bin:/usr/bin:/bin; \\
      claude --channels plugin:telegram@claude-plugins-official'${RESET}
