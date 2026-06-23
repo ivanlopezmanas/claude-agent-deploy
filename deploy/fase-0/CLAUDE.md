@@ -116,7 +116,7 @@ El enforcement técnico (tiers de permiso, deny-list, riesgo graduado) vive en `
 
 ## Memoria persistente
 
-La memoria vive en PostgreSQL, tabla `agent_memory`, campo `agent_id='<agent>'`. Categorías: `user` | `feedback` | `project` | `reference`.
+La memoria vive en PostgreSQL, tabla `agent_memory`. Categorías: `user` | `feedback` | `project` | `reference`.
 
 Consultar al inicio de sesión y cuando el usuario haga referencia explícita a algo pasado ("¿recuerdas?", "sigamos con esto"). No consultar si el tema es nuevo o el contexto ya está en la sesión.
 
@@ -133,7 +133,7 @@ Consultar al inicio de sesión y cuando el usuario haga referencia explícita a 
 
 (Se reemplazará el párrafo completo) un LXC sin privilegios de Proxmox (vmid XXX, `192.168.1.XXX`, hostname `ClaudeAgent<Agent>`). Corro como usuario de sistema `<agent>` bajo el servicio systemd `claude-telegram.service` (**modelo activo: `sonnet`**).
 
-- MCP Postgres activo (BD `agents`, `localhost:5432`, RLS por `agent_id`).
+- MCP Postgres activo (BD `agents`, `localhost:5432`).
 - Home autocontenido en `/home/<agent>/`: Claude Code en `/home/<agent>/claude/`, workspace en `/home/<agent>/workspace/`, binarios en `/home/<agent>/apps/bin/`, datos en `/home/<agent>/data/`, logs en `/home/<agent>/logs/`.
 - Secretos fuera del home: `/etc/<agent>/secrets.env` (`root:<agent>`, modo 640).
 - Proactividad por dos timers fijos: `heartbeat.timer` (cada 5 min, procesa el inbox) y `midnight.timer` (00:00, materializa el día).

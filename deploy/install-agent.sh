@@ -72,8 +72,6 @@ manual_box() {
 # SECCIÓN 1 — Recogida de parámetros
 # =============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 log_info ""
 log_info "============================================================"
 log_info "  install-agent.sh — Provisioning de un agente Claude Code"
@@ -159,7 +157,7 @@ ask_secret TELEGRAM_BOT_TOKEN "Bot token de Telegram (oculto)"
 ask TELEGRAM_CHAT_ID  "Chat ID del propietario"         ""
 ask OWNER_NAME        "Nombre del propietario (para la BD)"  ""
 read -rp "Clave pública SSH del propietario (opcional, ENTER para omitir): " OWNER_SSH_KEY
-ask DEPLOY_SRC        "Directorio con los templates"    "${SCRIPT_DIR}"
+ask DEPLOY_SRC        "Directorio con los templates"    "/root/docs/claude-code-os/new/deploy"
 ask PROXMOX_TEMPLATE  "Template LXC"                    "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
 
 # Validar que el directorio de templates existe
@@ -168,9 +166,11 @@ if [[ ! -d "${DEPLOY_SRC}" ]]; then
   exit 1
 fi
 
-# Fijar el fichero de checkpoint ahora que tenemos AGENT_NAME y VMID
-CHECKPOINT_FILE="/tmp/install-${AGENT_NAME}-${VMID}.checkpoint"
-DEPLOY_TMP="/tmp/deploy-${AGENT_NAME}-${VMID}"
+# Checkpoint y árbol de deploy en /var/lib/install-agent — sobreviven reinicios del host.
+# Los ficheros con secretos (SQL, env, json) sí van a /tmp (más seguros allí).
+mkdir -p /var/lib/install-agent
+CHECKPOINT_FILE="/var/lib/install-agent/${AGENT_NAME}-${VMID}.checkpoint"
+DEPLOY_TMP="/var/lib/install-agent/deploy-${AGENT_NAME}-${VMID}"
 
 # Borrar ficheros temporales con secretos al salir (éxito o error)
 cleanup_tmp() {
@@ -363,9 +363,9 @@ step_08_init_db() {
   # Copiar al LXC y ejecutar
   pct push "${VMID}" "${tmp_sql}" /tmp/init-db.sql --perms 600
   lxc_exec "chown postgres:postgres /tmp/init-db.sql"
-  lxc_exec "runuser -u postgres -- psql -v ON_ERROR_STOP=1 -f /tmp/init-db.sql"
+  lxc_exec "sudo -u postgres psql -v ON_ERROR_STOP=1 -f /tmp/init-db.sql"
   # Verificar tablas
-  lxc_exec "runuser -u postgres -- psql -d agents -c '\\dt'"
+  lxc_exec "sudo -u postgres psql -d agents -c '\\dt'"
   # Limpiar el SQL con el password en claro (host y LXC)
   rm -f "${tmp_sql}"
   lxc_exec "rm -f /tmp/init-db.sql"
@@ -399,8 +399,7 @@ step_10_bun() {
 step_11_mcp_postgres() {
   lxc_exec "
     set -e
-    export PATH=/home/${AGENT_NAME}/apps/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-    NPM_CONFIG_PREFIX=/home/${AGENT_NAME}/apps npm install -g @modelcontextprotocol/server-postgres
+    NPM_CONFIG_PREFIX=/home/${AGENT_NAME}/apps /home/${AGENT_NAME}/apps/bin/npm install -g @modelcontextprotocol/server-postgres
     chown -R ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}/apps
     ls /home/${AGENT_NAME}/apps/bin/mcp-server-postgres
   "
@@ -550,6 +549,15 @@ prepare_deploy_tmp() {
     mv "$f" "$(echo "$f" | sed "s|<agent>|${AGENT_NAME}|g")"
   done
 
+  # Verificar que no quedan ficheros sin renombrar (fallo silencioso del rename → rompe pasos siguientes).
+  local unresolved
+  unresolved=$(find "${DEPLOY_TMP}/" -name "*<agent>*" 2>/dev/null)
+  if [[ -n "${unresolved}" ]]; then
+    log_fail "prepare_deploy_tmp: ficheros sin renombrar con <agent> en el nombre:"
+    echo "${unresolved}" >&2
+    return 1
+  fi
+
   # Inyectar la sección de onboarding al final del CLAUDE.md (solo en la copia temporal).
   local claude_md="${DEPLOY_TMP}/fase-0/CLAUDE.md"
   if [[ -f "${claude_md}" ]]; then
@@ -670,10 +678,14 @@ run_step STEP_19_TO_26 "Copiar workspace y harness al LXC"     step_19_to_26_wor
 # SECCIÓN 7 — Fase F: Servicios y seguridad (pasos 27-36)
 # =============================================================================
 
-# Los pasos 27-29 leen de DEPLOY_TMP, que prepare_deploy_tmp() construye en /tmp.
-# Si la sección anterior fue saltada por el checkpoint (re-ejecución) y /tmp fue
-# limpiado entre intentos, DEPLOY_TMP puede no existir — lo regeneramos aquí.
-[[ -d "${DEPLOY_TMP}" ]] || prepare_deploy_tmp
+# Los pasos 27-29 leen de DEPLOY_TMP. Si la sección anterior fue saltada por el checkpoint
+# o el árbol está incompleto (p.ej. borrado manual), lo regeneramos.
+# Comprobamos ficheros clave, no solo que el directorio exista.
+if [[ ! -f "${DEPLOY_TMP}/fase-0/etc/sudoers.d/${AGENT_NAME}" ]] || \
+   [[ ! -f "${DEPLOY_TMP}/fase-0/systemd/claude-telegram.service" ]]; then
+  log_info "DEPLOY_TMP incompleto o ausente — regenerando..."
+  prepare_deploy_tmp
+fi
 
 step_27_systemd_units() {
   local sd="${DEPLOY_TMP}/fase-0/systemd"

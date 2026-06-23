@@ -47,7 +47,7 @@ def reconcile_core_tasks(cur) -> int:
     for t in tasks:
         # ¿Hay una entrada futura pendiente para esta tarea?
         cur.execute(
-            "SELECT 1 FROM inbox "
+            "SELECT 1 FROM agent_inbox "
             "WHERE source = %s AND processed_at IS NULL AND process_after >= now() "
             "LIMIT 1",
             (f"core_task:{t['name']}",)
@@ -61,7 +61,7 @@ def reconcile_core_tasks(cur) -> int:
             "script_path": t['script_path'],
         }
         cur.execute(
-            "INSERT INTO inbox (source, event_type, payload, severity, agent, "
+            "INSERT INTO agent_inbox (source, event_type, payload, severity, agent, "
             "dedupe_key, process_after) "
             "VALUES (%s, 'task', %s::jsonb, 'low', 'any', %s, %s)",
             (

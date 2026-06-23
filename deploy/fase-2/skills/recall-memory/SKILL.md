@@ -11,7 +11,6 @@ version: 1.0.0
 # Skill /recall-memory — Recuperar contexto de sesiones anteriores
 
 Consulta la tabla `agent_memory` en PostgreSQL via MCP (`mcp__postgres__query_data`).
-Usa `agent_id='<agent>'` en todas las queries.
 
 ---
 
@@ -22,7 +21,6 @@ Usa `agent_id='<agent>'` en todas las queries.
 ```sql
 SELECT category, keywords, text, fecha
 FROM agent_memory
-WHERE agent_id='<agent>'
 ORDER BY fecha DESC
 LIMIT 10;
 ```
@@ -32,8 +30,7 @@ LIMIT 10;
 ```sql
 SELECT category, keywords, text, fecha
 FROM agent_memory
-WHERE agent_id='<agent>'
-  AND keywords && ARRAY['tema']
+WHERE keywords && ARRAY['tema']
 ORDER BY fecha DESC
 LIMIT 10;
 ```
@@ -43,8 +40,7 @@ LIMIT 10;
 ```sql
 SELECT category, keywords, text, fecha
 FROM agent_memory
-WHERE agent_id='<agent>'
-  AND to_tsvector('spanish', text) @@ plainto_tsquery('spanish', 'búsqueda')
+WHERE to_tsvector('spanish', text) @@ plainto_tsquery('spanish', 'búsqueda')
 ORDER BY fecha DESC
 LIMIT 10;
 ```
@@ -54,8 +50,7 @@ LIMIT 10;
 ```sql
 SELECT category, keywords, text, fecha
 FROM agent_memory
-WHERE agent_id='<agent>'
-  AND DATE(fecha) = 'YYYY-MM-DD'
+WHERE DATE(fecha) = 'YYYY-MM-DD'
 ORDER BY fecha DESC;
 ```
 

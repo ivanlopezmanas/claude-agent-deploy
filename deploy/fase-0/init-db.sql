@@ -6,7 +6,7 @@
 --   Este password DEBE coincidir con el de POSTGRES_CONNECTION_STRING en
 --   /etc/<agent>/secrets.env (paso 15 del checklist §1.8).
 --
--- Crea: usuario <agent>, base de datos agents, las 12 tablas + 1 vista + índices,
+-- Crea: usuario <agent>, base de datos agents, las 12 tablas + índices,
 -- Row Level Security sobre agent_memory y el dato semilla del owner.
 -- El orden respeta dependencias FK y es ejecutable de arriba a abajo.
 
@@ -20,15 +20,15 @@ CREATE DATABASE agents OWNER <agent>;
 \c agents
 
 -- ============================================================================
--- 2. Schema completo (§1.2) — 12 tablas + 1 vista + índices
+-- 2. Schema completo (§1.2) — 12 tablas + índices
 --    Orden FK-seguro:
---      domains, pending_prompts, agent_memory, slot_type, scheduled_task,
---      inbox, core_task, schedule_config, daily_schedule, <agent>_telemetry,
---      <agent>_backup_log, <agent>_user_roles  →  vista family_shared_memory
+--      agent_domains, pending_prompts, agent_memory, slot_type, scheduled_task,
+--      agent_inbox, core_task, schedule_config, daily_schedule, agent_telemetry,
+--      agent_backup_log, agent_user_roles
 -- ============================================================================
 
--- ---- §2 Kernel: domains -----------------------------------------------------
-CREATE TABLE domains (
+-- ---- §2 Kernel: agent_domains -----------------------------------------------
+CREATE TABLE agent_domains (
   id       SERIAL PRIMARY KEY,
   name     VARCHAR(50) UNIQUE NOT NULL,
   keywords TEXT[],
@@ -59,7 +59,6 @@ CREATE INDEX idx_pending_approve ON pending_prompts (approve_by, status)
 CREATE TABLE agent_memory (
   -- Identidad
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  agent_id      TEXT NOT NULL,                   -- '<agent>', extensible multi-agente
   user_id       BIGINT DEFAULT NULL,             -- NULL = memoria del agente; valor = usuario específico
 
   -- Contenido
@@ -83,11 +82,11 @@ CREATE TABLE agent_memory (
   -- embedding vector(384)                       -- NULL hasta activar pgvector (fase 2)
 );
 
-CREATE INDEX ON agent_memory (agent_id, category);
+CREATE INDEX ON agent_memory (category);
 CREATE INDEX ON agent_memory USING GIN (keywords);
 CREATE INDEX ON agent_memory USING GIN (entities);
-CREATE INDEX ON agent_memory (agent_id, expires_at) WHERE superseded_by IS NULL;
-CREATE INDEX idx_agent_memory_user ON agent_memory (agent_id, user_id);
+CREATE INDEX ON agent_memory (expires_at) WHERE superseded_by IS NULL;
+CREATE INDEX idx_agent_memory_user ON agent_memory (user_id);
 
 -- ---- §8 Proactividad: slot_type --------------------------------------------
 CREATE TABLE slot_type (
@@ -117,8 +116,8 @@ CREATE TABLE scheduled_task (
   enabled     BOOLEAN NOT NULL DEFAULT true
 );
 
--- ---- §8 Proactividad: inbox ------------------------------------------------
-CREATE TABLE inbox (
+-- ---- §8 Proactividad: agent_inbox ------------------------------------------
+CREATE TABLE agent_inbox (
   id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   source            TEXT NOT NULL CHECK (source <> ''),
   event_type        TEXT NOT NULL
@@ -152,11 +151,11 @@ CREATE TABLE inbox (
 );
 
 CREATE INDEX inbox_pending
-  ON inbox (process_after)
+  ON agent_inbox (process_after)
   WHERE processed_at IS NULL;
 
 CREATE UNIQUE INDEX inbox_dedupe
-  ON inbox (source, event_type, dedupe_key)
+  ON agent_inbox (source, event_type, dedupe_key)
   WHERE processed_at IS NULL AND dedupe_key IS NOT NULL;
 
 -- ---- §8 Proactividad: core_task --------------------------------------------
@@ -246,8 +245,8 @@ CREATE UNIQUE INDEX daily_schedule_modifier
 CREATE INDEX daily_schedule_active
   ON daily_schedule (date, start_ts, end_ts);
 
--- ---- §10 Observabilidad: <agent>_telemetry -------------------------------------
-CREATE TABLE <agent>_telemetry (
+-- ---- §10 Observabilidad: agent_telemetry ------------------------------------
+CREATE TABLE agent_telemetry (
   id          BIGSERIAL PRIMARY KEY,
   ts          TIMESTAMPTZ NOT NULL DEFAULT now(),
   session_id  TEXT,
@@ -255,17 +254,17 @@ CREATE TABLE <agent>_telemetry (
   tool_name   TEXT,
   decision    TEXT,            -- 'allow' | 'block' | 'review' | 'require_confirmation'
   duration_ms INT,
-  context     TEXT,            -- <AGENT>_CONTEXT: main | subagent | background | cron
+  context     TEXT,            -- AGENT_CONTEXT: main | subagent | background | cron
   error       TEXT,
   metadata    JSONB DEFAULT '{}'
 );
 
-CREATE INDEX ON <agent>_telemetry (session_id);
-CREATE INDEX ON <agent>_telemetry (ts);
-CREATE INDEX ON <agent>_telemetry (tool_name, decision);
+CREATE INDEX ON agent_telemetry (session_id);
+CREATE INDEX ON agent_telemetry (ts);
+CREATE INDEX ON agent_telemetry (tool_name, decision);
 
--- ---- §11 Resiliencia: <agent>_backup_log ---------------------------------------
-CREATE TABLE <agent>_backup_log (
+-- ---- §11 Resiliencia: agent_backup_log --------------------------------------
+CREATE TABLE agent_backup_log (
   id          BIGSERIAL PRIMARY KEY,
   ts          TIMESTAMPTZ DEFAULT now(),
   type        TEXT,          -- 'full' | 'diff' | 'verify'
@@ -275,8 +274,8 @@ CREATE TABLE <agent>_backup_log (
   error       TEXT
 );
 
--- ---- §13 Multiusuario: <agent>_user_roles --------------------------------------
-CREATE TABLE <agent>_user_roles (
+-- ---- §13 Multiusuario: agent_user_roles -------------------------------------
+CREATE TABLE agent_user_roles (
   id           BIGSERIAL PRIMARY KEY,
   user_id      BIGINT NOT NULL UNIQUE,   -- Telegram user_id (o equivalente según canal)
   name         TEXT NOT NULL,
@@ -289,28 +288,7 @@ CREATE TABLE <agent>_user_roles (
   notes        TEXT
 );
 
--- ---- Vista: family_shared_memory -------------------------------------------
-CREATE VIEW family_shared_memory AS
-SELECT * FROM agent_memory
-WHERE agent_id = '<agent>'
-  AND (expires_at IS NULL OR expires_at > now())
-  AND superseded_by IS NULL
-  AND metadata->>'shared' = 'true';
-
 -- ============================================================================
--- 3. Row Level Security: cada agente solo ve sus propios registros
+-- 3. Dato semilla: owner del sistema
 -- ============================================================================
-ALTER TABLE agent_memory ENABLE ROW LEVEL SECURITY;
--- FORCE es imprescindible: <agent> es OWNER de la BD/tabla (CREATE DATABASE ... OWNER
--- <agent>), y el owner SALTA el RLS por defecto. Sin FORCE, la policy no se aplica al
--- propio agente y el aislamiento es ilusorio.
-ALTER TABLE agent_memory FORCE ROW LEVEL SECURITY;
-CREATE POLICY agent_isolation ON agent_memory
-    FOR ALL TO <agent>
-    USING (agent_id = current_user)
-    WITH CHECK (agent_id = current_user);
-
--- ============================================================================
--- 4. Dato semilla: owner del sistema
--- ============================================================================
-INSERT INTO <agent>_user_roles (user_id, name, role) VALUES (<owner_chat_id>, '<owner_name>', 'owner');
+INSERT INTO agent_user_roles (user_id, name, role) VALUES (<owner_chat_id>, '<owner_name>', 'owner');

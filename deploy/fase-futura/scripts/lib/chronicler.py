@@ -10,7 +10,7 @@ Al finalizar una sesión:
 5. Notifica a Telegram el resumen de la sesión.
 
 Guards: solo en contexto main; ignora subagentes (sdk-cli) y reentradas (<AGENT>_HOOK_RUNNING).
-agent_id en agent_memory = '<agent>'. La columna de texto del hecho es 'content' (§1.2).
+La columna de texto del hecho es 'content' (§1.2).
 """
 
 import json
@@ -134,9 +134,9 @@ def insert_memories(session_id, memories):
             try:
                 cur.execute(
                     "INSERT INTO agent_memory "
-                    "(agent_id, session_id, category, keywords, content, importance) "
-                    "VALUES (%s, %s::uuid, %s, %s, %s, %s)",
-                    ('<agent>', session_id, category, keywords, content, importance)
+                    "(session_id, category, keywords, content, importance) "
+                    "VALUES (%s::uuid, %s, %s, %s, %s)",
+                    (session_id, category, keywords, content, importance)
                 )
                 conn.commit()
                 inserted += 1

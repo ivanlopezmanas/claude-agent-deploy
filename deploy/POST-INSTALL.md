@@ -91,7 +91,7 @@ Ambos deben aparecer con próxima ejecución programada.
 
 ```bash
 pct exec <VMID> -- psql -U <agent> -d agents -c "
-  SELECT COUNT(*) FROM agent_memory WHERE agent_id='<agent>';
+  SELECT COUNT(*) FROM agent_memory;
 "
 ```
 
