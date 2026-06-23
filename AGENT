@@ -1,0 +1,25 @@
+{
+  "paths": [
+    { "path": "/home/<agent>/claude/CLAUDE.md",                              "tier": "T2",    "policy": "con-permiso", "note": "Kernel; escribir solo con aprobación del usuario" },
+    { "path": "/home/<agent>/workspace/docs/",                              "tier": "T1",    "policy": "libre" },
+    { "path": "/home/<agent>/workspace/docs/tareas/",                       "tier": "T1",    "policy": "libre" },
+    { "path": "/home/<agent>/workspace/docs/improvements/",                "tier": "T1",    "policy": "libre" },
+    { "path": "/home/<agent>/workspace/docs/incidentes/",                  "tier": "T1",    "policy": "libre" },
+    { "path": "/home/<agent>/workspace/scripts/",                          "tier": "T2",    "policy": "con-permiso" },
+    { "path": "/home/<agent>/workspace/tests/",                            "tier": "T1",    "policy": "libre" },
+    { "path": "/home/<agent>/workspace/scripts/hooks/<agent>-",                "tier": "T3",    "policy": "con-permiso", "note": "Hooks del harness; cambio = security review" },
+    { "path": "/home/<agent>/workspace/scripts/lib/<agent>_common.py",         "tier": "T3",    "policy": "con-permiso" },
+    { "path": "/home/<agent>/workspace/scripts/lib/<agent>_workspace.json",    "tier": "T3",    "policy": "con-permiso" },
+    { "path": "/home/<agent>/claude/.claude/settings.json",               "tier": "T2",    "policy": "con-permiso" },
+    { "path": "/home/<agent>/claude/.claude/settings-background.json",    "tier": "T2",    "policy": "con-permiso" },
+    { "path": "/home/<agent>/claude/.claude/projects/-home-<agent>-claude/memory/", "tier": "never", "policy": "nunca", "note": "Memoria vive en PostgreSQL" },
+    { "path": "/home/<agent>/claude/.claude/",                             "tier": "never", "policy": "nunca", "note": "Internos de Claude Code" },
+    { "path": "/tmp/<agent>-",                                             "tier": "T1",    "policy": "libre", "note": "Estado transitorio entre hooks" },
+    { "path": "/home/<agent>/logs/<agent>-",                                   "tier": "T1",    "policy": "libre", "note": "Logs de auditoría (escritos por el uid del hook)" },
+    { "path": "/etc/",                                                 "tier": "never", "policy": "nunca", "note": "SO" },
+    { "path": "/usr/lib/",                                             "tier": "never", "policy": "nunca", "note": "SO" },
+    { "path": "/usr/share/",                                           "tier": "never", "policy": "nunca", "note": "SO" },
+    { "path": "/home/<agent>/.ssh/",                                       "tier": "never", "policy": "nunca", "note": "Secretos" },
+    { "path": "/etc/<agent>/secrets.env",                                  "tier": "never", "policy": "nunca", "note": "Secretos" }
+  ]
+}
