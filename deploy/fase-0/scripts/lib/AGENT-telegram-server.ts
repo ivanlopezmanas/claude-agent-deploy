@@ -26,14 +26,12 @@ import { join, extname, sep } from 'path'
 const STATE_DIR = process.env.TELEGRAM_STATE_DIR ?? join(homedir(), '.claude', 'channels', 'telegram')
 const ACCESS_FILE = join(STATE_DIR, 'access.json')
 const APPROVED_DIR = join(STATE_DIR, 'approved')
-const ENV_FILE = join(STATE_DIR, '.env')
 
-// Load ~/.claude/channels/telegram/.env into process.env. Real env wins.
-// Plugin-spawned servers don't get an env block — this is where the token lives.
+// Plugin-spawned servers don't inherit the parent env block.
+// Read secrets from the system secrets file (outside the agent workspace).
+// Real env wins — only set vars that are not already defined.
 try {
-  // Token is a credential — lock to owner. No-op on Windows (would need ACLs).
-  chmodSync(ENV_FILE, 0o600)
-  for (const line of readFileSync(ENV_FILE, 'utf8').split('\n')) {
+  for (const line of readFileSync('/etc/<agent>/secrets.env', 'utf8').split('\n')) {
     const m = line.match(/^(\w+)=(.*)$/)
     if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2]
   }

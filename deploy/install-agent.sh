@@ -395,6 +395,9 @@ step_10_bun() {
     curl -fsSL https://bun.sh/install | bash
     chown ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}/apps/bin/bun
     /home/${AGENT_NAME}/apps/bin/bun --version
+    # Symlink en PATH del sistema para que Claude Code encuentre bun al lanzar plugins.
+    # El PATH por defecto del LXC es /sbin:/bin:/usr/sbin:/usr/bin — sin /home/nox/apps/bin.
+    ln -sf /home/${AGENT_NAME}/apps/bin/bun /usr/bin/bun
   "
 }
 
@@ -513,6 +516,9 @@ EOF"
 }
 
 step_18_trust() {
+  # Configura .claude.json: acepta trust y pre-registra el MCP de postgres.
+  # El servidor va aquí (no en .mcp.json) para evitar el diálogo interactivo
+  # de aprobación que bloquea el servicio al arrancar sin TTY.
   lxc_exec "python3 - <<'PYEOF'
 import json
 path = '/home/${AGENT_NAME}/claude/.claude.json'
@@ -521,7 +527,14 @@ try:
         d = json.load(f)
 except FileNotFoundError:
     d = {}
-d.setdefault('projects', {}).setdefault('/home/${AGENT_NAME}/claude', {})['hasTrustDialogAccepted'] = True
+proj = d.setdefault('projects', {}).setdefault('/home/${AGENT_NAME}/claude', {})
+proj['hasTrustDialogAccepted'] = True
+proj['mcpServers'] = {
+    'postgres': {
+        'command': '/home/${AGENT_NAME}/apps/bin/mcp-server-postgres',
+        'args': ['postgresql://${AGENT_NAME}:${PG_PASSWORD}@localhost:5432/agents']
+    }
+}
 with open(path, 'w') as f:
     json.dump(d, f, indent=2)
 print('OK')
@@ -651,23 +664,8 @@ step_19_to_26_workspace() {
   push_file "fase-1/settings.json"            "${AH}/claude/.claude/settings.json"
   push_file "fase-1/settings-background.json" "${AH}/claude/.claude/settings-background.json"
 
-  # .mcp.json — registra el servidor MCP de PostgreSQL en el HOME de Claude Code.
-  # Sin este fichero el agente arranca sin acceso a la BD vía MCP.
-  local tmp_mcp="/tmp/mcp-${AGENT_NAME}-${VMID}.json"
-  umask 077
-  cat > "${tmp_mcp}" <<MCPEOF
-{
-  "mcpServers": {
-    "postgres": {
-      "command": "/home/${AGENT_NAME}/apps/bin/mcp-server-postgres",
-      "args": ["postgresql://${AGENT_NAME}:${PG_PASSWORD}@localhost:5432/agents"]
-    }
-  }
-}
-MCPEOF
-  pct push "${VMID}" "${tmp_mcp}" "${AH}/claude/.mcp.json" --perms 600
-  lxc_exec "chown ${AGENT_NAME}:${AGENT_NAME} ${AH}/claude/.mcp.json"
-  rm -f "${tmp_mcp}"
+  # El servidor MCP de postgres va en .claude.json (step_18_trust), no en .mcp.json.
+  # .mcp.json dispara un diálogo interactivo de aprobación que bloquea el servicio.
 
   # Agentes y skills (fase-2) — placeholders ya sustituidos por prepare_deploy_tmp
   push_dir_contents "fase-2/agents" "${AH}/claude/.claude/agents"
