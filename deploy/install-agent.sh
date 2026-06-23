@@ -273,7 +273,7 @@ step_04_apt_update() {
 }
 
 step_05_deps() {
-  lxc_exec "export DEBIAN_FRONTEND=noninteractive && apt install -y curl unzip python3 python3-pip python3-psycopg2 python3-pytest postgresql apparmor apparmor-utils locales"
+  lxc_exec "export DEBIAN_FRONTEND=noninteractive && apt install -y curl unzip python3 python3-pip python3-psycopg2 python3-pytest postgresql apparmor apparmor-utils locales sudo"
   lxc_exec "grep -q '^en_US.UTF-8' /etc/locale.gen 2>/dev/null || echo 'en_US.UTF-8 UTF-8' >> /etc/locale.gen"
   lxc_exec "locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8"
 }
@@ -365,9 +365,9 @@ step_08_init_db() {
   # Copiar al LXC y ejecutar
   pct push "${VMID}" "${tmp_sql}" /tmp/init-db.sql --perms 600
   lxc_exec "chown postgres:postgres /tmp/init-db.sql"
-  lxc_exec "sudo -u postgres psql -v ON_ERROR_STOP=1 -f /tmp/init-db.sql"
+  lxc_exec "su -s /bin/bash postgres -c 'psql -v ON_ERROR_STOP=1 -f /tmp/init-db.sql'"
   # Verificar tablas
-  lxc_exec "sudo -u postgres psql -d agents -c '\\dt'"
+  lxc_exec "su -s /bin/bash postgres -c 'psql -d agents -c \"\\\\dt\"'"
   # Limpiar el SQL con el password en claro (host y LXC)
   rm -f "${tmp_sql}"
   lxc_exec "rm -f /tmp/init-db.sql"
