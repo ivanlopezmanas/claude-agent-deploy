@@ -1,0 +1,102 @@
+# /etc/apparmor.d/home.<agent>.claude
+#
+# Perfil AppArmor para el proceso Claude Code de <Agent>.
+#
+# IMPORTANTE — orden de carga (paso 31 del §1.8):
+#   apparmor_parser -r /etc/apparmor.d/home.<agent>.claude
+#   aa-complain     /etc/apparmor.d/home.<agent>.claude     # loguea pero NO bloquea
+#   # ejercitar el agente (Telegram, /reset, heartbeat) y revisar denegaciones:
+#   #   journalctl -k | grep -i apparmor    ó    aa-logprof
+#   # SOLO cuando no haya denegaciones de operaciones legítimas:
+#   aa-enforce      /etc/apparmor.d/home.<agent>.claude
+#
+# ADVERTENCIA red: si el perfil media red (reglas 'network' presentes), AppArmor
+# deniega por defecto todo lo no declarado. Sin 'network inet stream/dgram' el
+# servicio no puede hablar con api.telegram.org, completar OAuth ni conectar a
+# PostgreSQL. Por eso se valida primero en aa-complain.
+
+abi <abi/3.0>,
+
+#include <tunables/global>
+
+/home/<agent>/claude/.local/bin/claude {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+  #include <abstractions/openssl>
+
+  # ---- Red (IPv4 saliente: Telegram, OAuth, Postgres local; DNS) ----
+  network inet stream,
+  network inet dgram,
+  deny network inet6,
+
+  # ---- Home del agente: lectura/escritura total ----
+  /home/<agent>/                      r,
+  /home/<agent>/**                    rw,
+
+  # ---- Binarios propios del agente (apps/bin) ----
+  /home/<agent>/apps/bin/*            ix,
+  /home/<agent>/apps/bin/node         ix,
+  /home/<agent>/apps/bin/bun          ix,
+  /home/<agent>/apps/bin/npm          ix,
+  /home/<agent>/apps/bin/mcp-server-postgres   ix,
+  /home/<agent>/apps/bin/yt-dlp       ix,
+  /home/<agent>/apps/bin/ffmpeg       ix,
+  /home/<agent>/apps/bin/whisper-cli  ix,
+  /home/<agent>/apps/bin/clean        ix,
+  /home/<agent>/apps/lib/**           mr,
+
+  # ---- Claude Code CLI ----
+  /home/<agent>/claude/.local/bin/*   ix,
+  /home/<agent>/claude/.local/bin/claude   ix,
+
+  # ---- Scripts y hooks del workspace ----
+  /home/<agent>/workspace/scripts/**  ix,
+
+  # ---- Binarios del sistema que el servicio necesita ejecutar ----
+  /usr/bin/env                    ix,
+  /usr/bin/python3                ix,
+  /usr/bin/python3.*              ix,
+  /usr/bin/sudo                   ix,
+  /usr/bin/systemctl              ix,
+  /bin/bash                       ix,
+  /usr/bin/bash                   ix,
+  /usr/bin/psql                   ix,
+  /usr/bin/git                    ix,
+  /usr/bin/curl                   ix,
+  /usr/bin/node                   ix,
+  /bin/ls                         ix,
+  /usr/bin/ls                     ix,
+  /usr/bin/cat                    ix,
+  /usr/bin/grep                   ix,
+  /usr/bin/find                   ix,
+  /usr/bin/systemd-run            ix,
+
+  # ---- Lectura del sistema ----
+  /usr/lib/**                     mr,
+  /usr/share/**                   r,
+  /lib/**                         mr,
+  /lib64/**                       mr,
+  /proc/**                        r,
+  /sys/**                         r,
+  /etc/passwd                     r,
+  /etc/group                      r,
+  /etc/localtime                  r,
+  /etc/ssl/certs/**               r,
+  /etc/resolv.conf                r,
+  /etc/nsswitch.conf              r,
+
+  # ---- Secretos: solo lectura del fichero del agente ----
+  /etc/<agent>/secrets.env            r,
+
+  # ---- Temporales ----
+  /tmp/                           r,
+  /tmp/**                         rw,
+
+  # ---- Denegaciones explícitas (defensa en profundidad) ----
+  deny /etc/passwd                w,
+  deny /etc/shadow                rw,
+  deny /etc/sudoers               rw,
+  deny /etc/sudoers.d/**          rw,
+  deny /home/<agent>/.ssh/**          rw,
+  deny /etc/systemd/system/**     w,
+}

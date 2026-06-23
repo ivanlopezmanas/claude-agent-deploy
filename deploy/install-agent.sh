@@ -547,16 +547,18 @@ prepare_deploy_tmp() {
     -e "s|<Agent>|${AGENT_TITLE}|g" \
     -e "s|<agent>|${AGENT_NAME}|g"
 
-  # Renombrar ficheros que tengan <agent> en su nombre (de hojas a raíz: -depth).
-  find "${DEPLOY_TMP}/" -depth -name "*<agent>*" | while read -r f; do
-    mv "$f" "$(echo "$f" | sed "s|<agent>|${AGENT_NAME}|g")"
+  # Renombrar ficheros que tengan AGENT en su nombre (de hojas a raíz: -depth).
+  # Los templates usan AGENT (sin corchetes) para sobrevivir la subida a GitHub,
+  # que reemplaza < y > con _ haciendo que el rename no funcione.
+  find "${DEPLOY_TMP}/" -depth -name "*AGENT*" | while read -r f; do
+    mv "$f" "$(echo "$f" | sed "s|AGENT|${AGENT_NAME}|g")"
   done
 
-  # Verificar que no quedan ficheros sin renombrar (fallo silencioso del rename → rompe pasos siguientes).
+  # Verificar que no quedan ficheros sin renombrar.
   local unresolved
-  unresolved=$(find "${DEPLOY_TMP}/" -name "*<agent>*" 2>/dev/null)
+  unresolved=$(find "${DEPLOY_TMP}/" -name "*AGENT*" 2>/dev/null)
   if [[ -n "${unresolved}" ]]; then
-    log_fail "prepare_deploy_tmp: ficheros sin renombrar con <agent> en el nombre:"
+    log_fail "prepare_deploy_tmp: ficheros sin renombrar con AGENT en el nombre:"
     echo "${unresolved}" >&2
     return 1
   fi
