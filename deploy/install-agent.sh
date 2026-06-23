@@ -504,6 +504,10 @@ step_16_telegram_plugin() {
 
 step_17_channel_dir() {
   lxc_exec "mkdir -p /home/${AGENT_NAME}/claude/.claude/channels/telegram"
+  # Pre-populate access.json con el chat_id del owner para saltarse el pairing manual.
+  lxc_exec "cat > /home/${AGENT_NAME}/claude/.claude/channels/telegram/access.json <<'EOF'
+{\"dmPolicy\":\"pairing\",\"allowFrom\":[\"${TELEGRAM_CHAT_ID}\"],\"groups\":{},\"pending\":{}}
+EOF"
   lxc_exec "chown -R ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}/claude/.claude/channels"
   lxc_exec "grep -q 'TELEGRAM_BOT_TOKEN' /etc/${AGENT_NAME}/secrets.env"
 }
@@ -774,41 +778,22 @@ run_step STEP_31 "Verificar servicio arrancado"               step_31_verify_ser
 # =============================================================================
 
 step_32_pairing() {
+  # El access.json ya fue pre-poblado en STEP_17 con el chat_id del owner.
+  # No se necesita pairing manual. Solo verificar que el servicio responde.
   manual_box
   cat <<EOF
-${BOLD}Emparejar Telegram (pairing)${RESET}
+${BOLD}Verificar que el agente responde por Telegram${RESET}
 
-El servicio ya está corriendo y el bot espera el pairing. Pasos:
+El pairing ya está hecho automáticamente (STEP_17 pre-pobl el access.json con tu chat_id).
 
-1. Envía cualquier mensaje al bot de Telegram → recibirás un código de 6 caracteres.
-
-2. Para hacer el pairing se necesita una sesión interactiva con el plugin activo.
-   Detén el servicio, lanza una sesión manual, empareja y reinicia. En OTRA terminal
-   del host Proxmox:
-
-   ${GREEN}pct exec ${VMID} -- systemctl stop claude-telegram.service${RESET}
-
-   ${GREEN}pct exec ${VMID} -- su -s /bin/bash ${AGENT_NAME} -c '\\
-     set -a; source /etc/${AGENT_NAME}/secrets.env; set +a; \\
-     export HOME=/home/${AGENT_NAME}/claude; \\
-     export PATH=/home/${AGENT_NAME}/apps/bin:/home/${AGENT_NAME}/claude/.local/bin:/usr/local/bin:/usr/bin:/bin; \\
-     claude --channels plugin:telegram@claude-plugins-official'${RESET}
-
-   En la sesión interactiva que se abre, ejecuta:
-       ${GREEN}/telegram:access pair <código>${RESET}
-   Sal con Ctrl+C. Luego reinicia el servicio:
-
-   ${GREEN}pct exec ${VMID} -- systemctl start claude-telegram.service${RESET}
-
-3. Envía "hola" desde Telegram — el agente debe responder.
-
-Nota: el pairing es exclusivo del setup humano. El agente en runtime nunca debe
-invocar /telegram:access pair (el hook lo prohíbe).
+Envía "hola" al bot desde Telegram — el agente debe responder.
+Si no responde en 30 segundos, comprueba los logs:
+   ${GREEN}pct exec ${VMID} -- journalctl -u claude-telegram.service -n 50${RESET}
 EOF
   echo ""
-  read -rp "Pulsa ENTER cuando hayas completado el pairing y el agente responda..."
+  read -rp "Pulsa ENTER cuando el agente haya respondido..."
   lxc_exec "systemctl is-active claude-telegram.service" | grep -q '^active' || {
-    log_warn "El servicio no está active tras el pairing. Arráncalo: pct exec ${VMID} -- systemctl start claude-telegram.service"
+    log_warn "El servicio no está active. Arráncalo: pct exec ${VMID} -- systemctl start claude-telegram.service"
   }
   return 0
 }
