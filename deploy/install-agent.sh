@@ -401,6 +401,7 @@ step_10_bun() {
 step_11_mcp_postgres() {
   lxc_exec "
     set -e
+    export PATH=/home/${AGENT_NAME}/apps/bin:\$PATH
     NPM_CONFIG_PREFIX=/home/${AGENT_NAME}/apps /home/${AGENT_NAME}/apps/bin/npm install -g @modelcontextprotocol/server-postgres
     chown -R ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}/apps
     ls /home/${AGENT_NAME}/apps/bin/mcp-server-postgres
