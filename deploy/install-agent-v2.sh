@@ -2,14 +2,17 @@
 #
 # install-agent-v2.sh — Provisioning completo de un agente Claude Code en un LXC de Proxmox.
 #
-# VERSION 2 — Flujo reorganizado en dos fases:
-#   Fase A: Setup completo del sistema, copia de ficheros, instalación de Claude, OAuth.
-#           El CLAUDE.md se copia SIN la sección de onboarding.
-#   Fase B: Instalación de bun, MCP de postgres, configuración del access.json (allowlist),
-#           arranque del servicio.
-#   Verificación Telegram (STEP_32): el usuario prueba que el agente responde.
-#   Verificación final (STEP_33): pytest, postgres, heartbeat.
-#   Onboarding (STEP_34, último): inyecta el bloque en CLAUDE.md — el próximo mensaje lo dispara.
+# VERSION 2 — Flujo secuencial (STEP_01 a STEP_28):
+#   STEP_01-05: LXC base (create, start, SSH, apt, deps).
+#   STEP_06-08: Usuario, PostgreSQL, init-db.
+#   STEP_09-10: Claude Code + OAuth.
+#   STEP_11-15: Secrets, canal Telegram, trust, workspace.
+#   STEP_16-20: Node.js, Bun, MCP, plugin Telegram, access.json.
+#   STEP_21-22: systemd, sudoers.  STEP_23: AppArmor (comentado).
+#   STEP_24-25: enable/start + verificar servicio.
+#   STEP_26: Verificación Telegram (manual).
+#   STEP_27: Verificación final (pytest, postgres, heartbeat).
+#   STEP_28: Onboarding (último) — inyecta bloque en CLAUDE.md.
 #
 # Ejecutar EN EL HOST Proxmox (no dentro del LXC). Requiere: pct, pveam, rsync.
 #
@@ -198,7 +201,7 @@ if [[ ! "${CONFIRM}" =~ ^[sSyY]$ ]]; then
 fi
 
 # =============================================================================
-# SECCIÓN 2 — Fase A: LXC base (pasos 1-5)
+# SECCIÓN 2 — LXC base (STEP_01-05)
 # =============================================================================
 
 step_01_create_lxc() {
@@ -262,7 +265,7 @@ run_step STEP_04 "apt update + upgrade"                       step_04_apt_update
 run_step STEP_05 "Instalar dependencias del sistema"         step_05_deps
 
 # =============================================================================
-# SECCIÓN 3 — Fase B: Usuario, estructura y base de datos (pasos 6-13)
+# SECCIÓN 3 — Usuario, base de datos y setup del agente (STEP_06-15)
 # =============================================================================
 
 step_06_user_dirs() {
@@ -350,7 +353,7 @@ step_08_init_db() {
   lxc_exec "rm -f /tmp/init-db.sql"
 }
 
-step_09_node() {
+step_16_node() {
   lxc_exec "
     set -e
     NODE_VERSION='v22.11.0'
@@ -365,7 +368,7 @@ step_09_node() {
   "
 }
 
-step_10_bun() {
+step_17_bun() {
   lxc_exec "
     set -e
     export BUN_INSTALL=/home/${AGENT_NAME}/apps
@@ -378,7 +381,7 @@ step_10_bun() {
   "
 }
 
-step_11_mcp_postgres() {
+step_18_mcp_postgres() {
   lxc_exec "
     set -e
     export PATH=/home/${AGENT_NAME}/apps/bin:\$PATH
@@ -388,7 +391,7 @@ step_11_mcp_postgres() {
   "
 }
 
-step_fase_b_config() {
+step_20_telegram_access() {
   # Escribe el access.json definitivo con allowlist (sin pairing).
   lxc_exec "cat > /home/${AGENT_NAME}/claude/.claude/channels/telegram/access.json <<'EOF'
 {\"dmPolicy\":\"allowlist\",\"allowFrom\":[\"${TELEGRAM_CHAT_ID}\"],\"groups\":{},\"pending\":{}}
@@ -397,13 +400,13 @@ EOF"
   log_ok "access.json escrito con dmPolicy:allowlist y chat_id ${TELEGRAM_CHAT_ID}."
 }
 
-step_12_claude_code() {
+step_09_claude_code() {
   lxc_exec "su -s /bin/bash ${AGENT_NAME} -c 'export HOME=/home/${AGENT_NAME}/claude && curl -fsSL https://claude.ai/install.sh | bash'"
   lxc_exec "chown -R ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}/claude"
   lxc_exec "/home/${AGENT_NAME}/claude/.local/bin/claude --version"
 }
 
-step_13_oauth() {
+step_10_oauth() {
   manual_box
   cat <<EOF
 ${BOLD}OAuth interactivo de Claude Code${RESET}
@@ -441,23 +444,23 @@ EOF
 run_step STEP_06 "Crear usuario y estructura de directorios"   step_06_user_dirs
 run_step STEP_07 "Configurar PostgreSQL (PGDATA en el home)"   step_07_postgres_relocate
 run_step STEP_08 "Inicializar base de datos"                   step_08_init_db
-# STEP_09 (Node.js), STEP_10 (Bun) y STEP_11 (MCP) se ejecutan en FASE B,
-# después del OAuth, junto con la instalación del plugin Telegram y el access.json.
-run_step STEP_12 "Instalar Claude Code"                        step_12_claude_code
-run_step STEP_13 "OAuth interactivo de Claude Code (manual)"   step_13_oauth
+# STEP_16 (Node.js), STEP_17 (Bun) y STEP_18 (MCP) se ejecutan después del OAuth,
+# junto con la instalación del plugin Telegram y el access.json.
+run_step STEP_09 "Instalar Claude Code"                        step_09_claude_code
+run_step STEP_10 "OAuth interactivo de Claude Code (manual)"   step_10_oauth
 
 # =============================================================================
 # SECCIÓN 4 — Fase C: Secretos (pasos 14-15)
 # =============================================================================
 
-step_14_secrets_file() {
+step_11_secrets_file() {
   lxc_exec "mkdir -p /etc/${AGENT_NAME}"
   lxc_exec "touch /etc/${AGENT_NAME}/secrets.env"
   lxc_exec "chmod 640 /etc/${AGENT_NAME}/secrets.env"
   lxc_exec "chown root:${AGENT_NAME} /etc/${AGENT_NAME}/secrets.env"
 }
 
-step_15_secrets_fill() {
+step_12_secrets_fill() {
   # Escribir secrets.env SIN que los secretos pasen por stdout/argv visibles.
   # Generamos el fichero localmente con heredoc y lo empujamos con pct push.
   local tmp_secrets="/tmp/secrets-${AGENT_NAME}-${VMID}.env"
@@ -474,14 +477,14 @@ EOF
   lxc_exec "grep -q '^TELEGRAM_BOT_TOKEN=' /etc/${AGENT_NAME}/secrets.env && grep -q '^POSTGRES_CONNECTION_STRING=' /etc/${AGENT_NAME}/secrets.env"
 }
 
-run_step STEP_14 "Crear /etc/${AGENT_NAME}/secrets.env"        step_14_secrets_file
-run_step STEP_15 "Rellenar secrets.env (secretos)"            step_15_secrets_fill
+run_step STEP_11 "Crear /etc/${AGENT_NAME}/secrets.env"        step_11_secrets_file
+run_step STEP_12 "Rellenar secrets.env (secretos)"            step_12_secrets_fill
 
 # =============================================================================
 # SECCIÓN 5 — Fase D: Plugin Telegram (pasos 16-18)
 # =============================================================================
 
-step_16_telegram_plugin() {
+step_19_telegram_plugin() {
   lxc_exec "su -s /bin/bash ${AGENT_NAME} -c '
     export HOME=/home/${AGENT_NAME}/claude
     export PATH=/home/${AGENT_NAME}/apps/bin:/home/${AGENT_NAME}/claude/.local/bin:/usr/local/bin:/usr/bin:/bin
@@ -490,15 +493,15 @@ step_16_telegram_plugin() {
   lxc_exec "su -s /bin/bash ${AGENT_NAME} -c 'HOME=/home/${AGENT_NAME}/claude PATH=/home/${AGENT_NAME}/apps/bin:/home/${AGENT_NAME}/claude/.local/bin:/usr/local/bin:/usr/bin:/bin claude plugin list'"
 }
 
-step_17_channel_dir() {
-  # v2: solo crea el directorio. El access.json se escribe en step_fase_b_config
-  # (Fase B), después del OAuth, junto con la inyección del onboarding en CLAUDE.md.
+step_13_channel_dir() {
+  # v2: solo crea el directorio. El access.json se escribe en step_20_telegram_access
+  # (STEP_20), después de instalar el plugin Telegram.
   lxc_exec "mkdir -p /home/${AGENT_NAME}/claude/.claude/channels/telegram"
   lxc_exec "chown -R ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}/claude/.claude/channels"
   lxc_exec "grep -q 'TELEGRAM_BOT_TOKEN' /etc/${AGENT_NAME}/secrets.env"
 }
 
-step_18_trust() {
+step_14_trust() {
   # Configura .claude.json: acepta trust y pre-registra el MCP de postgres.
   # El servidor va aquí (no en .mcp.json) para evitar el diálogo interactivo
   # de aprobación que bloquea el servicio al arrancar sin TTY.
@@ -525,9 +528,9 @@ PYEOF"
   lxc_exec "chown ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}/claude/.claude.json"
 }
 
-run_step STEP_17 "Preparar directorio del canal Telegram"      step_17_channel_dir
-run_step STEP_18 "Aceptar trust de /home/${AGENT_NAME}/claude" step_18_trust
-# STEP_16 (plugin Telegram) se instala en FASE B junto con bun — el plugin requiere bun.
+run_step STEP_13 "Preparar directorio del canal Telegram"      step_13_channel_dir
+run_step STEP_14 "Aceptar trust de /home/${AGENT_NAME}/claude" step_14_trust
+# STEP_19 (plugin Telegram) se instala después de bun (STEP_17) — el plugin requiere bun.
 
 # =============================================================================
 # SECCIÓN 6 — Fase E: Workspace y harness (pasos 19-26)
@@ -548,7 +551,7 @@ prepare_deploy_tmp() {
     -e "s|<agent>|${AGENT_NAME}|g"
 
   # Nota v2: el bloque de onboarding NO se inyecta aquí.
-  # Se añade al CLAUDE.md del LXC en step_fase_b_config, después del OAuth y de
+  # Se añade al CLAUDE.md del LXC en step_20_telegram_access, después del OAuth y de
   # instalar bun/MCP, para que el primer mensaje de Telegram dispare el onboarding.
 }
 
@@ -584,7 +587,7 @@ push_dir_contents() {
   done < <(find "${srcdir}" -type f -print0)
 }
 
-step_19_to_26_workspace() {
+step_15_workspace() {
   prepare_deploy_tmp
 
   local AH="/home/${AGENT_NAME}"
@@ -612,7 +615,7 @@ step_19_to_26_workspace() {
   push_file "fase-1/settings.json"            "${AH}/claude/.claude/settings.json"
   push_file "fase-1/settings-background.json" "${AH}/claude/.claude/settings-background.json"
 
-  # El servidor MCP de postgres va en .claude.json (step_18_trust), no en .mcp.json.
+  # El servidor MCP de postgres va en .claude.json (step_14_trust), no en .mcp.json.
   # .mcp.json dispara un diálogo interactivo de aprobación que bloquea el servicio.
 
   # Agentes y skills (fase-2) — placeholders ya sustituidos por prepare_deploy_tmp
@@ -627,7 +630,7 @@ step_19_to_26_workspace() {
   lxc_exec "chown -R ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}"
 }
 
-run_step STEP_19_TO_26 "Copiar workspace y harness al LXC"     step_19_to_26_workspace
+run_step STEP_15 "Copiar workspace y harness al LXC"     step_15_workspace
 
 # =============================================================================
 # SECCIÓN 7 — Fase F: Servicios y seguridad (pasos 27-36)
@@ -642,7 +645,7 @@ if [[ ! -f "${DEPLOY_TMP}/fase-0/etc/sudoers.d/agent" ]] || \
   prepare_deploy_tmp
 fi
 
-step_27_systemd_units() {
+step_21_systemd_units() {
   local sd="${DEPLOY_TMP}/fase-0/systemd"
   local unit
   for unit in claude-telegram.service heartbeat.timer heartbeat.service midnight.timer midnight.service; do
@@ -655,7 +658,7 @@ step_27_systemd_units() {
   done
 }
 
-step_28_sudoers() {
+step_22_sudoers() {
   local src="${DEPLOY_TMP}/fase-0/etc/sudoers.d/agent"
   if [[ ! -f "${src}" ]]; then
     log_fail "No existe el sudoers template: ${src}"
@@ -666,7 +669,7 @@ step_28_sudoers() {
   lxc_exec "visudo -cf /etc/sudoers.d/${AGENT_NAME}"
 }
 
-step_29_apparmor() {
+step_23_apparmor() {
   local src="${DEPLOY_TMP}/fase-1/apparmor/apparmor-profile"
   if [[ ! -f "${src}" ]]; then
     log_fail "No existe el perfil AppArmor: ${src}"
@@ -691,13 +694,13 @@ step_29_apparmor() {
   fi
 }
 
-step_30_enable_start() {
+step_24_enable_start() {
   lxc_exec "systemctl daemon-reload"
   lxc_exec "systemctl enable claude-telegram.service heartbeat.timer midnight.timer"
   lxc_exec "systemctl start claude-telegram.service"
 }
 
-step_31_verify_service() {
+step_25_verify_service() {
   echo ""
   lxc_exec "systemctl status claude-telegram.service --no-pager" || true
   echo ""
@@ -714,26 +717,26 @@ step_31_verify_service() {
 }
 
 # =============================================================================
-# FASE B — Bun, MCP de postgres, access.json
+# SECCIÓN 4 — Servicios y arranque (STEP_16-28)
 # =============================================================================
-run_step STEP_09 "Instalar Node.js"                            step_09_node
-run_step STEP_10 "Instalar Bun"                                step_10_bun
-run_step STEP_11 "Instalar MCP PostgreSQL"                     step_11_mcp_postgres
-run_step STEP_16 "Instalar plugin Telegram"                    step_16_telegram_plugin
-run_step STEP_FASE_B "Configurar acceso Telegram (allowlist)"  step_fase_b_config
+run_step STEP_16 "Instalar Node.js"                            step_16_node
+run_step STEP_17 "Instalar Bun"                                step_17_bun
+run_step STEP_18 "Instalar MCP PostgreSQL"                     step_18_mcp_postgres
+run_step STEP_19 "Instalar plugin Telegram"                    step_19_telegram_plugin
+run_step STEP_20 "Configurar acceso Telegram (allowlist)"  step_20_telegram_access
 
-run_step STEP_27 "Copiar y registrar unit files systemd"      step_27_systemd_units
-run_step STEP_28 "Crear sudoers del agente"                   step_28_sudoers
-# run_step STEP_29 "Cargar perfil AppArmor (modo complain)"     step_29_apparmor  # Pendiente: requiere namespacing AppArmor en host PVE
-run_step STEP_30 "daemon-reload + enable + start"             step_30_enable_start
-run_step STEP_31 "Verificar servicio arrancado"               step_31_verify_service
+run_step STEP_21 "Copiar y registrar unit files systemd"      step_21_systemd_units
+run_step STEP_22 "Crear sudoers del agente"                   step_22_sudoers
+# run_step STEP_23 "Cargar perfil AppArmor (modo complain)"     step_23_apparmor  # Pendiente: requiere namespacing AppArmor en host PVE
+run_step STEP_24 "daemon-reload + enable + start"             step_24_enable_start
+run_step STEP_25 "Verificar servicio arrancado"               step_25_verify_service
 
 # =============================================================================
 # SECCIÓN 8 — Fase G: Pairing Telegram (pasos 37-39)
 # =============================================================================
 
-step_32_pairing() {
-  # v2: el access.json ya tiene dmPolicy:allowlist (STEP_FASE_B).
+step_26_telegram_verify() {
+  # v2: el access.json ya tiene dmPolicy:allowlist (STEP_20).
   manual_box
   cat <<EOF
 ${BOLD}Verificar Telegram${RESET}
@@ -754,13 +757,13 @@ EOF
   return 0
 }
 
-run_step STEP_32 "Emparejar Telegram (manual)"                step_32_pairing
+run_step STEP_26 "Emparejar Telegram (manual)"                step_26_telegram_verify
 
 # =============================================================================
 # SECCIÓN 9 — Verificación final (pasos 42-48)
 # =============================================================================
 
-step_33_final_checks() {
+step_27_final_checks() {
   echo ""
   log_info "Verificaciones automáticas:"
 
@@ -799,13 +802,13 @@ EOF
   return 0
 }
 
-run_step STEP_33 "Verificación final"                         step_33_final_checks
+run_step STEP_27 "Verificación final"                         step_27_final_checks
 
 # =============================================================================
 # SECCIÓN 10 — Onboarding (último paso)
 # =============================================================================
 
-step_34_onboarding() {
+step_28_onboarding() {
   # Inyecta el bloque de onboarding en el CLAUDE.md del LXC.
   # Este es el último paso: el sistema ya está verificado y funcionando.
   # El próximo mensaje del usuario disparará el onboarding automáticamente.
@@ -840,7 +843,7 @@ EOF
   read -rp "Pulsa ENTER para terminar..."
 }
 
-run_step STEP_34 "Inyectar onboarding en CLAUDE.md (último paso)" step_34_onboarding
+run_step STEP_28 "Inyectar onboarding en CLAUDE.md (último paso)" step_28_onboarding
 
 # =============================================================================
 # SECCIÓN 11 — Mensaje final
@@ -861,7 +864,7 @@ cat <<EOF
        pct exec ${VMID} -- aa-enforce /etc/apparmor.d/home.${AGENT_NAME}.claude
   2. Verificaciones desde Telegram: /context, /skills, /reset (ver arriba).
   3. Onboarding: en el primer mensaje, el agente preguntará los datos del propietario
-     STEP_34 inyecta el bloque de onboarding — el primer mensaje lo disparará.
+     STEP_28 inyecta el bloque de onboarding — el primer mensaje lo disparará.
   4. Filtro anti-injection (§1.8 paso 22b): el userprompt-hook arranca en fail-open
      hasta que exista /home/${AGENT_NAME}/apps/bin/clean. Implementar según §1.8 paso 22b.
   5. Crons (Fase H) NO instalados — diferidos a §8 (proactividad por core_task).
