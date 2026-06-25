@@ -99,6 +99,23 @@ try:
             _kill_ticker(session_id)
         REWAKE_COUNTER.write_text(json.dumps({"n": 0, "t0": time.time()}))
         TELEGRAM_TURN_FLAG.unlink(missing_ok=True)
+        # Muestra barra de contexto si >30% (no bloquea el cierre del turno)
+        transcript_path = data.get("transcript_path") or ""
+        if transcript_path:
+            try:
+                import subprocess as _sp
+                _sp.Popen(
+                    [sys.executable,
+                     "/home/<agent>/workspace/scripts/lib/context.py",
+                     "--mode", "hook",
+                     "--transcript", transcript_path],
+                    start_new_session=True,
+                    stdin=_sp.DEVNULL,
+                    stdout=_sp.DEVNULL,
+                    stderr=_sp.DEVNULL,
+                )
+            except Exception:
+                pass
         sys.exit(0)
 
     # Guarda 2: rewake-counter (máx 4 en 60s)
