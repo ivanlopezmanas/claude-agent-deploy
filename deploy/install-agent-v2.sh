@@ -502,8 +502,8 @@ step_13_channel_dir() {
 }
 
 step_14_trust() {
-  # Configura .claude.json: acepta trust y pre-registra el MCP de postgres.
-  # El servidor va aquí (no en .mcp.json) para evitar el diálogo interactivo
+  # Configura .claude.json: acepta trust y pre-registra los MCPs.
+  # Los servidores van aquí (no en .mcp.json) para evitar el diálogo interactivo
   # de aprobación que bloquea el servicio al arrancar sin TTY.
   lxc_exec "python3 - <<'PYEOF'
 import json
@@ -519,6 +519,10 @@ proj['mcpServers'] = {
     'postgres': {
         'command': '/home/${AGENT_NAME}/apps/bin/mcp-server-postgres',
         'args': ['postgresql://${AGENT_NAME}:${PG_PASSWORD}@localhost:5432/agents']
+    },
+    'context7': {
+        'command': 'npx',
+        'args': ['-y', '@upstash/context7-mcp@latest']
     }
 }
 with open(path, 'w') as f:
