@@ -289,6 +289,15 @@ CREATE TABLE agent_user_roles (
 );
 
 -- ============================================================================
--- 3. Dato semilla: owner del sistema
+-- 3. Permisos: el agente necesita acceso completo a todas las tablas
+-- ============================================================================
+GRANT USAGE ON SCHEMA public TO <agent>;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO <agent>;
+GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO <agent>;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO <agent>;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO <agent>;
+
+-- ============================================================================
+-- 4. Dato semilla: owner del sistema
 -- ============================================================================
 INSERT INTO agent_user_roles (user_id, name, role) VALUES (<owner_chat_id>, '<owner_name>', 'owner');
