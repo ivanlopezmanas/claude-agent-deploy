@@ -15,5 +15,5 @@ EnvironmentFile=/etc/<agent>/secrets.env
 TimeoutStartSec=4min
 # --strict-mcp-config es obligatorio: la sesión efímera NO debe heredar el plugin
 # de Telegram (evita la colisión de polling con la sesión principal).
-ExecStart=/home/<agent>/claude/.local/bin/claude --print --strict-mcp-config \
-  --input-file /home/<agent>/workspace/scripts/lib/prompts/heartbeat.md
+# Stdin redirect porque --input-file fue eliminado en Claude Code 2.x.
+ExecStart=/bin/bash -c '/home/<agent>/claude/.local/bin/claude --print --strict-mcp-config < /home/<agent>/workspace/scripts/lib/prompts/heartbeat.md'

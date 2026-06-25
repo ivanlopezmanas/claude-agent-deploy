@@ -274,6 +274,8 @@ def path_sensitivity(path: str) -> float:
     np = normalize_path(path)
     if any(s in np for s in (".ssh", ".env", "secret", ".pem", ".key")):
         return 1.0
+    if np.startswith("/dev/"):
+        return 1.0
     if any(s in np for s in ("/etc/", "/usr/", "settings.json", "workspace")):
         return 0.8
     if np.startswith("/tmp/") or "/home/<agent>/logs/<agent>-" in np:

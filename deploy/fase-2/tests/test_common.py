@@ -34,7 +34,7 @@ class TestLookupTier:
         assert nc.lookup_tier("/some/random/path") == "T1"
 
     def test_most_specific_wins(self):
-        # /home/<agent>/workspace/scripts/ es T2, pero /home/<agent>/workspace/scripts/hooks/<agent>- es T3
+        # /home/<agent>/workspace/scripts/ es T2, pero /home/<agent>/workspace/scripts/hooks/ es T3
         assert nc.lookup_tier("/home/<agent>/workspace/scripts/hooks/pretooluse-hook.py") == "T3"
         assert nc.lookup_tier("/home/<agent>/workspace/scripts/foo.sh") == "T2"
 
