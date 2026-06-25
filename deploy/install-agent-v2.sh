@@ -6,8 +6,10 @@
 #   Fase A: Setup completo del sistema, copia de ficheros, instalación de Claude, OAuth.
 #           El CLAUDE.md se copia SIN la sección de onboarding.
 #   Fase B: Instalación de bun, MCP de postgres, configuración del access.json (allowlist),
-#           inyección del bloque de onboarding en el CLAUDE.md, arranque del servicio.
-#   Verificación final: el usuario prueba Telegram y el onboarding ocurre en ese primer mensaje.
+#           arranque del servicio.
+#   Verificación Telegram (STEP_32): el usuario prueba que el agente responde.
+#   Verificación final (STEP_33): pytest, postgres, heartbeat.
+#   Onboarding (STEP_34, último): inyecta el bloque en CLAUDE.md — el próximo mensaje lo dispara.
 #
 # Ejecutar EN EL HOST Proxmox (no dentro del LXC). Requiere: pct, pveam, rsync.
 #
@@ -393,29 +395,6 @@ step_fase_b_config() {
 EOF"
   lxc_exec "chown ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}/claude/.claude/channels/telegram/access.json"
   log_ok "access.json escrito con dmPolicy:allowlist y chat_id ${TELEGRAM_CHAT_ID}."
-
-  # Inyectar la sección de onboarding al CLAUDE.md del LXC.
-  # El primer mensaje de Telegram disparará el onboarding automáticamente.
-  lxc_exec "cat >> /home/${AGENT_NAME}/claude/CLAUDE.md <<'ONBOARDING'
-
----
-
-## Primer arranque — LEER ESTO ANTES DE RESPONDER
-
-Este es el primer arranque del agente. El CLAUDE.md aún no contiene datos del usuario propietario.
-
-**Antes de responder al primer mensaje**, el agente debe:
-1. Avisar al usuario que es la primera sesión y que va a hacer unas preguntas de configuración
-2. Preguntar de forma conversacional (no como formulario): nombre completo, fecha de nacimiento, familia cercana (pareja, hijos con nombres y fechas), nivel técnico, principales usos del agente
-3. Preguntar el tono deseado: formal/informal, idioma preferido, estilo de respuesta
-4. Una vez recogida la información, actualizar este CLAUDE.md con los datos reales (Edit tool)
-5. Borrar esta sección \"Primer arranque\" del CLAUDE.md una vez completado el onboarding
-6. Confirmar al usuario que la configuración está guardada
-
-El agente NO debe responder preguntas normales hasta completar este flujo de onboarding.
-ONBOARDING"
-  lxc_exec "chown ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}/claude/CLAUDE.md"
-  log_ok "Bloque de onboarding añadido a CLAUDE.md."
 }
 
 step_12_claude_code() {
@@ -463,8 +442,7 @@ run_step STEP_06 "Crear usuario y estructura de directorios"   step_06_user_dirs
 run_step STEP_07 "Configurar PostgreSQL (PGDATA en el home)"   step_07_postgres_relocate
 run_step STEP_08 "Inicializar base de datos"                   step_08_init_db
 # STEP_09 (Node.js), STEP_10 (Bun) y STEP_11 (MCP) se ejecutan en FASE B,
-# después del OAuth, para que el onboarding y la verificación de Telegram sean
-# el último paso antes de que el agente esté operativo.
+# después del OAuth, junto con la instalación del plugin Telegram y el access.json.
 run_step STEP_12 "Instalar Claude Code"                        step_12_claude_code
 run_step STEP_13 "OAuth interactivo de Claude Code (manual)"   step_13_oauth
 
@@ -736,13 +714,13 @@ step_31_verify_service() {
 }
 
 # =============================================================================
-# FASE B — Bun, MCP de postgres, access.json y onboarding en CLAUDE.md
+# FASE B — Bun, MCP de postgres, access.json
 # =============================================================================
 run_step STEP_09 "Instalar Node.js"                            step_09_node
 run_step STEP_10 "Instalar Bun"                                step_10_bun
 run_step STEP_11 "Instalar MCP PostgreSQL"                     step_11_mcp_postgres
 run_step STEP_16 "Instalar plugin Telegram"                    step_16_telegram_plugin
-run_step STEP_FASE_B "Configurar acceso Telegram + onboarding" step_fase_b_config
+run_step STEP_FASE_B "Configurar acceso Telegram (allowlist)"  step_fase_b_config
 
 run_step STEP_27 "Copiar y registrar unit files systemd"      step_27_systemd_units
 run_step STEP_28 "Crear sudoers del agente"                   step_28_sudoers
@@ -756,23 +734,20 @@ run_step STEP_31 "Verificar servicio arrancado"               step_31_verify_ser
 
 step_32_pairing() {
   # v2: el access.json ya tiene dmPolicy:allowlist (STEP_FASE_B).
-  # El CLAUDE.md tiene la sección de onboarding — el primer mensaje la disparará.
   manual_box
   cat <<EOF
-${BOLD}Verificar Telegram + Onboarding automático${RESET}
+${BOLD}Verificar Telegram${RESET}
 
-El acceso está configurado con allowlist (sin pairing). El CLAUDE.md incluye la
-sección de onboarding — el primer mensaje que envíes disparará el proceso automáticamente.
+El acceso está configurado con allowlist (sin pairing).
 
-Envía cualquier mensaje al bot desde Telegram.
-Si el agente responde con las preguntas de onboarding → instalación completada.
+Envía cualquier mensaje al bot desde Telegram y comprueba que el agente responde.
 
-Si no responde en 30 segundos, comprueba los logs:
+Si no responde en 30 segundos, revisa los logs:
    ${GREEN}pct exec ${VMID} -- journalctl -u claude-telegram.service -n 50${RESET}
    ${GREEN}pct exec ${VMID} -- tail -50 /home/${AGENT_NAME}/logs/claude-telegram.log${RESET}
 EOF
   echo ""
-  read -rp "Pulsa ENTER cuando el agente haya respondido y el onboarding esté en marcha..."
+  read -rp "Pulsa ENTER cuando el agente haya respondido correctamente..."
   lxc_exec "systemctl is-active claude-telegram.service" | grep -q '^active' || {
     log_warn "El servicio no está active. Arráncalo: pct exec ${VMID} -- systemctl start claude-telegram.service"
   }
@@ -827,7 +802,48 @@ EOF
 run_step STEP_33 "Verificación final"                         step_33_final_checks
 
 # =============================================================================
-# SECCIÓN 10 — Mensaje final
+# SECCIÓN 10 — Onboarding (último paso)
+# =============================================================================
+
+step_34_onboarding() {
+  # Inyecta el bloque de onboarding en el CLAUDE.md del LXC.
+  # Este es el último paso: el sistema ya está verificado y funcionando.
+  # El próximo mensaje del usuario disparará el onboarding automáticamente.
+  lxc_exec "cat >> /home/${AGENT_NAME}/claude/CLAUDE.md <<'ONBOARDING'
+
+---
+
+## Primer arranque — LEER ESTO ANTES DE RESPONDER
+
+Este es el primer arranque del agente. El CLAUDE.md aún no contiene datos del usuario propietario.
+
+**Antes de responder al primer mensaje**, el agente debe:
+1. Avisar al usuario que es la primera sesión y que va a hacer unas preguntas de configuración
+2. Preguntar de forma conversacional (no como formulario): nombre completo, fecha de nacimiento, familia cercana (pareja, hijos con nombres y fechas), nivel técnico, principales usos del agente
+3. Preguntar el tono deseado: formal/informal, idioma preferido, estilo de respuesta
+4. Una vez recogida la información, actualizar este CLAUDE.md con los datos reales (Edit tool)
+5. Borrar esta sección \"Primer arranque\" del CLAUDE.md una vez completado el onboarding
+6. Confirmar al usuario que la configuración está guardada
+
+El agente NO debe responder preguntas normales hasta completar este flujo de onboarding.
+ONBOARDING"
+  lxc_exec "chown ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}/claude/CLAUDE.md"
+  log_ok "Bloque de onboarding añadido a CLAUDE.md."
+  manual_box
+  cat <<EOF
+${BOLD}Onboarding listo${RESET}
+
+El CLAUDE.md incluye ahora la sección de onboarding.
+El próximo mensaje que envíes al agente disparará el proceso de configuración inicial.
+EOF
+  echo ""
+  read -rp "Pulsa ENTER para terminar..."
+}
+
+run_step STEP_34 "Inyectar onboarding en CLAUDE.md (último paso)" step_34_onboarding
+
+# =============================================================================
+# SECCIÓN 11 — Mensaje final
 # =============================================================================
 
 echo ""
@@ -845,7 +861,7 @@ cat <<EOF
        pct exec ${VMID} -- aa-enforce /etc/apparmor.d/home.${AGENT_NAME}.claude
   2. Verificaciones desde Telegram: /context, /skills, /reset (ver arriba).
   3. Onboarding: en el primer mensaje, el agente preguntará los datos del propietario
-     y reescribirá su CLAUDE.md (sección "Primer arranque").
+     STEP_34 inyecta el bloque de onboarding — el primer mensaje lo disparará.
   4. Filtro anti-injection (§1.8 paso 22b): el userprompt-hook arranca en fail-open
      hasta que exista /home/${AGENT_NAME}/apps/bin/clean. Implementar según §1.8 paso 22b.
   5. Crons (Fase H) NO instalados — diferidos a §8 (proactividad por core_task).
