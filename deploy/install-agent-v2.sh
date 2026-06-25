@@ -812,7 +812,7 @@ step_33_final_checks() {
 
   echo ""
   log_info "[postgres] Conteo de agent_memory (criterio duro — debe responder sin error):"
-  if lxc_exec "su -s /bin/bash ${AGENT_NAME} -c 'set -a; . /etc/${AGENT_NAME}/secrets.env; set +a; psql \"\$POSTGRES_CONNECTION_STRING\" -tAc \"SELECT COUNT(*) FROM agent_memory WHERE agent_id='\''${AGENT_NAME}'\'';\"'"; then
+  if lxc_exec "su -s /bin/bash ${AGENT_NAME} -c 'set -a; . /etc/${AGENT_NAME}/secrets.env; set +a; psql \"\$POSTGRES_CONNECTION_STRING\" -tAc \"SELECT COUNT(*) FROM agent_memory;\"'"; then
     log_ok "agent_memory accesible con el usuario ${AGENT_NAME}."
   else
     log_fail "No se puede consultar agent_memory. Verifica: connection string en secrets.env, RLS, usuario ${AGENT_NAME} en la BD."
