@@ -168,7 +168,7 @@ def main():
     prompt = data.get("prompt", "") or ""
 
     # 1. Bandera de origen Telegram + ticker "trabajando"
-    if 'source="telegram"' in prompt:
+    if 'source="plugin:telegram:telegram"' in prompt:
         session_id = data.get("session_id") or ""
         try:
             TELEGRAM_TURN_FLAG.write_text(
