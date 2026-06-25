@@ -697,7 +697,7 @@ step_23_apparmor() {
 step_24_enable_start() {
   lxc_exec "systemctl daemon-reload"
   lxc_exec "systemctl enable claude-telegram.service heartbeat.timer midnight.timer"
-  lxc_exec "systemctl start claude-telegram.service"
+  lxc_exec "systemctl start claude-telegram.service heartbeat.timer midnight.timer"
 }
 
 step_25_verify_service() {
