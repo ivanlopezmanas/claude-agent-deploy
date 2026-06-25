@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-SCRIPT = "<agent>-userprompt-hook.py"
+SCRIPT = "userprompt-hook.py"
 FLAG_NAME = "<agent>-telegram-turn"
 
 

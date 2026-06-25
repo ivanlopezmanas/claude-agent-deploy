@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# chmod +x /home/<agent>/workspace/scripts/hooks/<agent>-stop-hook.py
-"""<agent>-stop-hook.py — Stop (guardrail de cierre, garantía de respuesta).
+# chmod +x /home/<agent>/workspace/scripts/hooks/stop-hook.py
+"""stop-hook.py — Stop (guardrail de cierre, garantía de respuesta).
 
 Determinista, local, FAIL-OPEN: si la lógica peta, deja cerrar el turno (un Stop
 hook que bloquea por su propio fallo cuelga la sesión).
@@ -18,7 +18,7 @@ import sys
 import time
 
 sys.path.insert(0, "/home/<agent>/workspace/scripts/lib")
-from <agent>_common import (read_hook_input, is_main_context, log_permission,
+from common import (read_hook_input, is_main_context, log_permission,
                         TELEGRAM_TURN_FLAG, REWAKE_COUNTER, reply_in_transcript)
 
 try:

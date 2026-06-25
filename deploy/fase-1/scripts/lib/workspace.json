@@ -9,7 +9,7 @@
     { "path": "/home/<agent>/workspace/tests/",                            "tier": "T1",    "policy": "libre" },
     { "path": "/home/<agent>/workspace/scripts/hooks/<agent>-",                "tier": "T3",    "policy": "con-permiso", "note": "Hooks del harness; cambio = security review" },
     { "path": "/home/<agent>/workspace/scripts/lib/<agent>_common.py",         "tier": "T3",    "policy": "con-permiso" },
-    { "path": "/home/<agent>/workspace/scripts/lib/<agent>_workspace.json",    "tier": "T3",    "policy": "con-permiso" },
+    { "path": "/home/<agent>/workspace/scripts/lib/workspace.json",    "tier": "T3",    "policy": "con-permiso" },
     { "path": "/home/<agent>/claude/.claude/settings.json",               "tier": "T2",    "policy": "con-permiso" },
     { "path": "/home/<agent>/claude/.claude/settings-background.json",    "tier": "T2",    "policy": "con-permiso" },
     { "path": "/home/<agent>/claude/.claude/projects/-home-<agent>-claude/memory/", "tier": "never", "policy": "nunca", "note": "Memoria vive en PostgreSQL" },

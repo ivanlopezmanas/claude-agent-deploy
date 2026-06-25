@@ -4,7 +4,7 @@ import time
 
 import pytest
 
-SCRIPT = "<agent>-stop-hook.py"
+SCRIPT = "stop-hook.py"
 TURN_FLAG = "<agent>-telegram-turn"
 REWAKE = "<agent>-stop-rewake-counter"
 

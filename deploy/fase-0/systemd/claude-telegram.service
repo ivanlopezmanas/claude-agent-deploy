@@ -16,8 +16,8 @@ Environment=HOME=/home/<agent>/claude
 Environment=PATH=/home/<agent>/apps/bin:/home/<agent>/claude/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 Environment=<AGENT>_CONTEXT=main
 EnvironmentFile=/etc/<agent>/secrets.env
-ExecStartPre=/home/<agent>/workspace/scripts/lib/<agent>-patch-telegram-plugin.sh
-ExecStartPre=/usr/bin/python3 /home/<agent>/workspace/scripts/lib/<agent>-register-commands.py
+ExecStartPre=/home/<agent>/workspace/scripts/lib/patch-telegram-plugin.sh
+ExecStartPre=/usr/bin/python3 /home/<agent>/workspace/scripts/lib/register-commands.py
 ExecStart=/home/<agent>/workspace/scripts/lib/claude-telegram-start.sh
 Restart=on-failure
 RestartSec=10

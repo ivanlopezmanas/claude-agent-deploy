@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# chmod +x /home/<agent>/workspace/scripts/hooks/<agent>-sessionstart-hook.py
-"""<agent>-sessionstart-hook.py — SessionStart (feedback).
+# chmod +x /home/<agent>/workspace/scripts/hooks/sessionstart-hook.py
+"""sessionstart-hook.py — SessionStart (feedback).
 
 No bloquea. FAIL-OPEN. Parte que pertenece al §4 (harness):
   1. Detecta primer arranque (ONBOARDING_PENDING en CLAUDE.md) e inyecta contexto.
@@ -56,7 +56,7 @@ if os.environ.get("CLAUDECODE") and CLAUDE_MD.exists():
         pass
 
 sys.path.insert(0, "/home/<agent>/workspace/scripts/lib")
-from <agent>_common import (read_hook_input, log_permission,
+from common import (read_hook_input, log_permission,
                         TELEGRAM_TURN_FLAG, REWAKE_COUNTER, APPROVAL_PENDING)
 
 ORPHAN_FLAGS = (TELEGRAM_TURN_FLAG, REWAKE_COUNTER, APPROVAL_PENDING)

@@ -89,7 +89,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/<agent>/workspace/scripts/hooks/<agent>-sessionstart-hook.py"
+            "command": "/home/<agent>/workspace/scripts/hooks/sessionstart-hook.py"
           }
         ]
       }
@@ -99,7 +99,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/<agent>/workspace/scripts/hooks/<agent>-userprompt-hook.py"
+            "command": "/home/<agent>/workspace/scripts/hooks/userprompt-hook.py"
           }
         ]
       }
@@ -110,7 +110,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/<agent>/workspace/scripts/hooks/<agent>-pretooluse-hook.py"
+            "command": "/home/<agent>/workspace/scripts/hooks/pretooluse-hook.py"
           }
         ]
       }
@@ -121,7 +121,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/<agent>/workspace/scripts/hooks/<agent>-posttooluse-hook.py"
+            "command": "/home/<agent>/workspace/scripts/hooks/posttooluse-hook.py"
           }
         ]
       }
@@ -131,7 +131,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/<agent>/workspace/scripts/hooks/<agent>-stop-hook.py"
+            "command": "/home/<agent>/workspace/scripts/hooks/stop-hook.py"
           }
         ]
       }
@@ -141,7 +141,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/<agent>/workspace/scripts/hooks/<agent>-notification-hook.py"
+            "command": "/home/<agent>/workspace/scripts/hooks/notification-hook.py"
           }
         ]
       }
@@ -151,7 +151,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/<agent>/workspace/scripts/hooks/<agent>-precompact-hook.py"
+            "command": "/home/<agent>/workspace/scripts/hooks/precompact-hook.py"
           }
         ]
       }

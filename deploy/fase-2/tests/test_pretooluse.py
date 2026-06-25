@@ -1,7 +1,7 @@
 # tests/test_pretooluse.py
 import pytest
 
-SCRIPT = "<agent>-pretooluse-hook.py"
+SCRIPT = "pretooluse-hook.py"
 
 
 def _decision(out):
@@ -73,13 +73,13 @@ class TestIsolation:
 
 
 def test_pretooluse_fails_loud_without_common(run_hook, monkeypatch, tmp_path):
-    """Sin <agent>_common importable, el guardrail debe fallar ruidoso, no dejar pasar."""
+    """Sin common importable, el guardrail debe fallar ruidoso, no dejar pasar."""
     import subprocess, sys, os
     # Forzamos un ImportError reescribiendo el sys.path del subproceso vía PYTHONPATH
     # no es suficiente (el hook hace insert(0) de la ruta real). Validamos en su lugar
     # que con input válido el fallo no produce allow silencioso: aquí cubrimos el caso
     # de input malformado que ya es fail-closed, y dejamos el escenario sin-common
     # como nota: el hook inserta la ruta absoluta de lib, garantizando la import.
-    rc, out, _ = run_hook("<agent>-pretooluse-hook.py",
+    rc, out, _ = run_hook("pretooluse-hook.py",
                           {"tool_name": "Write", "tool_input": {"file_path": "/etc/hosts"}})
     assert (out and out.get("hookSpecificOutput", {}).get("permissionDecision") == "deny") or rc != 0

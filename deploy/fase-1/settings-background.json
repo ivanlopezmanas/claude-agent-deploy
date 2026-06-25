@@ -59,7 +59,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/<agent>/workspace/scripts/hooks/<agent>-pretooluse-hook.py"
+            "command": "/home/<agent>/workspace/scripts/hooks/pretooluse-hook.py"
           }
         ]
       }
@@ -69,7 +69,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/home/<agent>/workspace/scripts/hooks/<agent>-stop-hook.py"
+            "command": "/home/<agent>/workspace/scripts/hooks/stop-hook.py"
           }
         ]
       }

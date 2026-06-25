@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# chmod +x /home/<agent>/workspace/scripts/hooks/<agent>-notification-hook.py
-"""<agent>-notification-hook.py — Notification (feedback).
+# chmod +x /home/<agent>/workspace/scripts/hooks/notification-hook.py
+"""notification-hook.py — Notification (feedback).
 
 Nunca bloquea. FAIL-OPEN. Solo actúa en contexto main.
 
@@ -13,7 +13,7 @@ import sys
 import time
 
 sys.path.insert(0, "/home/<agent>/workspace/scripts/lib")
-from <agent>_common import read_hook_input, is_main_context, APPROVAL_PENDING
+from common import read_hook_input, is_main_context, APPROVAL_PENDING
 
 try:
     if not is_main_context():

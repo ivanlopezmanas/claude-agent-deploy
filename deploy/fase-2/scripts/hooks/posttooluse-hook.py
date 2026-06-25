@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# chmod +x /home/<agent>/workspace/scripts/hooks/<agent>-posttooluse-hook.py
-"""<agent>-posttooluse-hook.py — PostToolUse (feedback puro).
+# chmod +x /home/<agent>/workspace/scripts/hooks/posttooluse-hook.py
+"""posttooluse-hook.py — PostToolUse (feedback puro).
 
 Nunca bloquea. FAIL-OPEN. Solo actúa en contexto main; en otros sale en silencio
 (sin feedback en subagentes, §4.5).
@@ -8,7 +8,7 @@ Nunca bloquea. FAIL-OPEN. Solo actúa en contexto main; en otros sale en silenci
 import sys
 
 sys.path.insert(0, "/home/<agent>/workspace/scripts/lib")
-from <agent>_common import read_hook_input, is_main_context, update_ticker_state, log_event
+from common import read_hook_input, is_main_context, update_ticker_state, log_event
 
 try:
     if not is_main_context():

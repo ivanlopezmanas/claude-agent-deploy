@@ -1,4 +1,4 @@
-# tests/test_<agent>_common.py
+# tests/test_common.py
 import importlib
 import json
 import sys
@@ -6,7 +6,7 @@ import sys
 import pytest
 
 sys.path.insert(0, "/home/<agent>/workspace/scripts/lib")
-import <agent>_common as nc
+import common as nc
 
 
 # ----------------------------------------------------------------- context()
@@ -35,7 +35,7 @@ class TestLookupTier:
 
     def test_most_specific_wins(self):
         # /home/<agent>/workspace/scripts/ es T2, pero /home/<agent>/workspace/scripts/hooks/<agent>- es T3
-        assert nc.lookup_tier("/home/<agent>/workspace/scripts/hooks/<agent>-pretooluse-hook.py") == "T3"
+        assert nc.lookup_tier("/home/<agent>/workspace/scripts/hooks/pretooluse-hook.py") == "T3"
         assert nc.lookup_tier("/home/<agent>/workspace/scripts/foo.sh") == "T2"
 
     def test_never_tier(self):

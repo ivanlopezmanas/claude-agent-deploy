@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""<agent>_common.py — utilidades compartidas por todos los hooks del agente.
+"""common.py — utilidades compartidas por todos los hooks del agente.
 
 Reglas de diseño:
 - Sin dependencias externas (stdlib only) en el camino crítico.
@@ -20,7 +20,7 @@ def _tmp(name: str) -> Path:
     return Path(base) / name
 
 LOG_PATH            = Path("/home/<agent>/logs/<agent>-permissions.log")
-WORKSPACE_TABLE     = Path("/home/<agent>/workspace/scripts/lib/<agent>_workspace.json")
+WORKSPACE_TABLE     = Path("/home/<agent>/workspace/scripts/lib/workspace.json")
 TELEGRAM_TURN_FLAG  = _tmp("<agent>-telegram-turn")
 REWAKE_COUNTER      = _tmp("<agent>-stop-rewake-counter")
 TICKER_STATE        = _tmp("<agent>-ticker-state.json")
@@ -274,7 +274,7 @@ def path_sensitivity(path: str) -> float:
     np = normalize_path(path)
     if any(s in np for s in (".ssh", ".env", "secret", ".pem", ".key")):
         return 1.0
-    if any(s in np for s in ("/etc/", "/usr/", "settings.json", "<agent>_workspace")):
+    if any(s in np for s in ("/etc/", "/usr/", "settings.json", "workspace")):
         return 0.8
     if np.startswith("/tmp/") or "/home/<agent>/logs/<agent>-" in np:
         return 0.0

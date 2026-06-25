@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# chmod +x /home/<agent>/workspace/scripts/hooks/<agent>-userprompt-hook.py
-"""<agent>-userprompt-hook.py — UserPromptSubmit (guardrail de entrada).
+# chmod +x /home/<agent>/workspace/scripts/hooks/userprompt-hook.py
+"""userprompt-hook.py — UserPromptSubmit (guardrail de entrada).
 
 Solo se registra en la sesión principal (no en settings-background). Pasos en orden
 (§4.1 §5.1):
@@ -17,7 +17,7 @@ import sys
 import time
 
 sys.path.insert(0, "/home/<agent>/workspace/scripts/lib")
-from <agent>_common import read_hook_input, inject_context, block, TELEGRAM_TURN_FLAG
+from common import read_hook_input, inject_context, block, TELEGRAM_TURN_FLAG
 
 CLEAN_BIN = "/home/<agent>/apps/bin/clean"
 SKILLS_DIR = "/home/<agent>/claude/.claude/skills"

@@ -509,7 +509,7 @@ step_17_channel_dir() {
   lxc_exec "mkdir -p /home/${AGENT_NAME}/claude/.claude/channels/telegram"
   # Pre-populate access.json con el chat_id del owner para saltarse el pairing manual.
   lxc_exec "cat > /home/${AGENT_NAME}/claude/.claude/channels/telegram/access.json <<'EOF'
-{\"dmPolicy\":\"pairing\",\"allowFrom\":[\"${TELEGRAM_CHAT_ID}\"],\"groups\":{},\"pending\":{}}
+{\"dmPolicy\":\"allowlist\",\"allowFrom\":[\"${TELEGRAM_CHAT_ID}\"],\"groups\":{},\"pending\":{}}
 EOF"
   lxc_exec "chown -R ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}/claude/.claude/channels"
   lxc_exec "grep -q 'TELEGRAM_BOT_TOKEN' /etc/${AGENT_NAME}/secrets.env"

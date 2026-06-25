@@ -569,22 +569,6 @@ prepare_deploy_tmp() {
     -e "s|<Agent>|${AGENT_TITLE}|g" \
     -e "s|<agent>|${AGENT_NAME}|g"
 
-  # Renombrar ficheros que tengan AGENT en su nombre (de hojas a raíz: -depth).
-  # Los templates usan AGENT (sin corchetes) para sobrevivir la subida a GitHub,
-  # que reemplaza < y > con _ haciendo que el rename no funcione.
-  find "${DEPLOY_TMP}/" -depth -name "*AGENT*" | while read -r f; do
-    mv "$f" "$(echo "$f" | sed "s|AGENT|${AGENT_NAME}|g")"
-  done
-
-  # Verificar que no quedan ficheros sin renombrar.
-  local unresolved
-  unresolved=$(find "${DEPLOY_TMP}/" -name "*AGENT*" 2>/dev/null)
-  if [[ -n "${unresolved}" ]]; then
-    log_fail "prepare_deploy_tmp: ficheros sin renombrar con AGENT en el nombre:"
-    echo "${unresolved}" >&2
-    return 1
-  fi
-
   # Nota v2: el bloque de onboarding NO se inyecta aquí.
   # Se añade al CLAUDE.md del LXC en step_fase_b_config, después del OAuth y de
   # instalar bun/MCP, para que el primer mensaje de Telegram dispare el onboarding.
@@ -674,7 +658,7 @@ run_step STEP_19_TO_26 "Copiar workspace y harness al LXC"     step_19_to_26_wor
 # Los pasos 27-29 leen de DEPLOY_TMP. Si la sección anterior no se ejecutó,
 # o el árbol está incompleto (p.ej. borrado manual), lo regeneramos.
 # Comprobamos ficheros clave, no solo que el directorio exista.
-if [[ ! -f "${DEPLOY_TMP}/fase-0/etc/sudoers.d/${AGENT_NAME}" ]] || \
+if [[ ! -f "${DEPLOY_TMP}/fase-0/etc/sudoers.d/agent" ]] || \
    [[ ! -f "${DEPLOY_TMP}/fase-0/systemd/claude-telegram.service" ]]; then
   log_info "DEPLOY_TMP incompleto o ausente — regenerando..."
   prepare_deploy_tmp
@@ -694,7 +678,7 @@ step_27_systemd_units() {
 }
 
 step_28_sudoers() {
-  local src="${DEPLOY_TMP}/fase-0/etc/sudoers.d/${AGENT_NAME}"
+  local src="${DEPLOY_TMP}/fase-0/etc/sudoers.d/agent"
   if [[ ! -f "${src}" ]]; then
     log_fail "No existe el sudoers template: ${src}"
     return 1
@@ -705,7 +689,7 @@ step_28_sudoers() {
 }
 
 step_29_apparmor() {
-  local src="${DEPLOY_TMP}/fase-1/apparmor/home.${AGENT_NAME}.claude"
+  local src="${DEPLOY_TMP}/fase-1/apparmor/apparmor-profile"
   if [[ ! -f "${src}" ]]; then
     log_fail "No existe el perfil AppArmor: ${src}"
     return 1

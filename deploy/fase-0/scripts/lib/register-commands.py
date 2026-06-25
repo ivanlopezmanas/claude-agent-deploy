@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# chmod +x /home/<agent>/workspace/scripts/lib/<agent>-register-commands.py
+# chmod +x /home/<agent>/workspace/scripts/lib/register-commands.py
 """One-shot script to register <Agent> commands in the Telegram bot menu via setMyCommands."""
 
 import json

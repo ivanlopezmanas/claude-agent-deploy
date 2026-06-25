@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# chmod +x /home/<agent>/workspace/scripts/hooks/<agent>-pretooluse-hook.py
-"""<agent>-pretooluse-hook.py — PreToolUse (guardrail más crítico).
+# chmod +x /home/<agent>/workspace/scripts/hooks/pretooluse-hook.py
+"""pretooluse-hook.py — PreToolUse (guardrail más crítico).
 
 Síncrono, sin canal Telegram, FAIL-CLOSED: si la lógica peta, bloquea con razón
 explícita — nunca exit 0 silencioso. Corre en TODOS los contextos (los guardrails
@@ -15,7 +15,7 @@ Orden de evaluación (§4.1 §5.2):
 import sys
 
 sys.path.insert(0, "/home/<agent>/workspace/scripts/lib")
-from <agent>_common import (read_hook_input, allow, block, ask, review,
+from common import (read_hook_input, allow, block, ask, review,
                         extract_path, lookup_tier, score_tool_call,
                         is_package_manager, is_dangerous_pipe, is_costly_agent,
                         is_memory_path)

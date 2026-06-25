@@ -9,9 +9,9 @@ import time
 
 import pytest
 
-PRETOOL = "<agent>-pretooluse-hook.py"
-POSTTOOL = "<agent>-posttooluse-hook.py"
-STOP = "<agent>-stop-hook.py"
+PRETOOL = "pretooluse-hook.py"
+POSTTOOL = "posttooluse-hook.py"
+STOP = "stop-hook.py"
 
 CONTEXTS = ["main", "subagent", "background", "cron"]
 
