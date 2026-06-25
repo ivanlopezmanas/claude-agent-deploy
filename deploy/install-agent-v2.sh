@@ -766,7 +766,7 @@ step_33_final_checks() {
 
   echo ""
   log_info "[pytest] Suite de tests del harness:"
-  lxc_exec "su -s /bin/bash ${AGENT_NAME} -c 'python3 -m pytest /home/${AGENT_NAME}/workspace/tests/ -q'" \
+  lxc_exec "su -s /bin/bash ${AGENT_NAME} -c 'cd /home/${AGENT_NAME} && python3 -m pytest /home/${AGENT_NAME}/workspace/tests/ -q'" \
     || log_warn "pytest reportó fallos o el harness aún no está completo (§4 F0-F5). Revisar."
 
   echo ""
