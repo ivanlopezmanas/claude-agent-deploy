@@ -724,7 +724,7 @@ run_step STEP_FASE_B "Configurar acceso Telegram (allowlist)"  step_fase_b_confi
 
 run_step STEP_27 "Copiar y registrar unit files systemd"      step_27_systemd_units
 run_step STEP_28 "Crear sudoers del agente"                   step_28_sudoers
-run_step STEP_29 "Cargar perfil AppArmor (modo complain)"     step_29_apparmor
+# run_step STEP_29 "Cargar perfil AppArmor (modo complain)"     step_29_apparmor  # Pendiente: requiere namespacing AppArmor en host PVE
 run_step STEP_30 "daemon-reload + enable + start"             step_30_enable_start
 run_step STEP_31 "Verificar servicio arrancado"               step_31_verify_service
 
