@@ -14,12 +14,62 @@ Guardas en orden (§4.1 §5.3):
   6. Block con mensaje de rewake.
 """
 import json
+import os
+import re
 import sys
 import time
+import urllib.request
+import urllib.parse
 
 sys.path.insert(0, "/home/<agent>/workspace/scripts/lib")
 from common import (read_hook_input, is_main_context, log_permission,
                         TELEGRAM_TURN_FLAG, REWAKE_COUNTER, reply_in_transcript)
+
+
+def _ticker_state_path(session_id: str) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", session_id)
+    return f"/tmp/<agent>-ticker-{safe}.json"
+
+
+def _kill_ticker(session_id: str) -> None:
+    path = _ticker_state_path(session_id)
+    try:
+        with open(path) as f:
+            state = json.load(f)
+    except Exception:
+        return
+    pid = state.get("ticker_pid")
+    if pid:
+        try:
+            os.kill(pid, 15)  # SIGTERM
+        except Exception:
+            pass
+    msg_id = state.get("tg_message_id")
+    if msg_id:
+        _tg_delete(msg_id)
+    try:
+        os.unlink(path)
+    except Exception:
+        pass
+
+
+def _tg_delete(message_id: int) -> None:
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id   = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if not bot_token or not chat_id:
+        return
+    try:
+        data = urllib.parse.urlencode(
+            {"chat_id": chat_id, "message_id": str(message_id)}
+        ).encode()
+        urllib.request.urlopen(
+            urllib.request.Request(
+                f"https://api.telegram.org/bot{bot_token}/deleteMessage", data=data
+            ),
+            timeout=8,
+        )
+    except Exception:
+        pass
 
 try:
     data = read_hook_input()
@@ -44,6 +94,9 @@ try:
 
     # ¿Reply emitido?
     if reply_in_transcript(data.get("transcript_path")):
+        session_id = data.get("session_id") or ""
+        if session_id:
+            _kill_ticker(session_id)
         REWAKE_COUNTER.write_text(json.dumps({"n": 0, "t0": time.time()}))
         TELEGRAM_TURN_FLAG.unlink(missing_ok=True)
         sys.exit(0)
@@ -53,6 +106,9 @@ try:
     if time.time() - state.get("t0", 0) > 60:
         state = {"n": 0, "t0": time.time()}
     if state.get("n", 0) >= 4:
+        session_id = data.get("session_id") or ""
+        if session_id:
+            _kill_ticker(session_id)
         REWAKE_COUNTER.write_text(json.dumps({"n": 0, "t0": time.time()}))
         log_permission("Stop", "force-release", "rewake-counter agotado")
         sys.exit(0)

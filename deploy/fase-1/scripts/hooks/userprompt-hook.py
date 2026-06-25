@@ -12,16 +12,20 @@ Solo se registra en la sesión principal (no en settings-background). Pasos en o
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import time
+import urllib.request
+import urllib.parse
 
 sys.path.insert(0, "/home/<agent>/workspace/scripts/lib")
 from common import read_hook_input, inject_context, block, TELEGRAM_TURN_FLAG
 
-CLEAN_BIN = "/home/<agent>/apps/bin/clean"
-SKILLS_DIR = "/home/<agent>/claude/.claude/skills"
-AGENTS_DIR = "/home/<agent>/claude/.claude/agents"
+CLEAN_BIN   = "/home/<agent>/apps/bin/clean"
+SKILLS_DIR  = "/home/<agent>/claude/.claude/skills"
+AGENTS_DIR  = "/home/<agent>/claude/.claude/agents"
+TICKER_SCRIPT = "/home/<agent>/workspace/scripts/lib/ticker.py"
 
 ACCESS_PATTERNS = (
     "aprueba", "aprobar", "pairing", "empareja", "allowlist",
@@ -98,18 +102,48 @@ def _handle_reset() -> None:
     sys.exit(0)
 
 
-def _tg_send(text: str) -> None:
-    import urllib.request, urllib.parse
-    bot_token = os.environ.get("<AGENT>_BOT_TOKEN", "")
-    chat_id = os.environ.get("<AGENT>_CHAT_ID", "")
+def _tg_send(text: str) -> int | None:
+    """Send a Telegram message; return message_id or None."""
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id   = os.environ.get("TELEGRAM_CHAT_ID", "")
     if not bot_token or not chat_id:
-        return
+        return None
     try:
         data = urllib.parse.urlencode({"chat_id": chat_id, "text": text}).encode()
-        urllib.request.urlopen(
-            urllib.request.Request(f"https://api.telegram.org/bot{bot_token}/sendMessage", data=data),
-            timeout=8,
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage", data=data
         )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            result = json.loads(resp.read())
+            return (result.get("result") or {}).get("message_id")
+    except Exception:
+        return None
+
+
+def _ticker_state_path(session_id: str) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9_-]", "_", session_id)
+    return f"/tmp/<agent>-ticker-{safe}.json"
+
+
+def _launch_ticker(session_id: str, tg_message_id: int) -> int | None:
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, TICKER_SCRIPT, session_id, str(tg_message_id)],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return proc.pid
+    except Exception:
+        return None
+
+
+def _save_ticker_state(session_id: str, tg_message_id: int, ticker_pid: int | None) -> None:
+    try:
+        with open(_ticker_state_path(session_id), "w") as f:
+            json.dump({"session_id": session_id, "tg_message_id": tg_message_id,
+                       "ticker_pid": ticker_pid}, f)
     except Exception:
         pass
 
@@ -133,14 +167,20 @@ def main():
     data = read_hook_input()
     prompt = data.get("prompt", "") or ""
 
-    # 1. Bandera de origen Telegram
+    # 1. Bandera de origen Telegram + ticker "trabajando"
     if 'source="telegram"' in prompt:
+        session_id = data.get("session_id") or ""
         try:
             TELEGRAM_TURN_FLAG.write_text(
-                json.dumps({"ts": time.time(), "session": data.get("session_id")})
+                json.dumps({"ts": time.time(), "session": session_id})
             )
         except Exception:
             pass
+        if session_id:
+            tg_msg_id = _tg_send("🔄 <Agent> trabajando.")
+            if tg_msg_id:
+                ticker_pid = _launch_ticker(session_id, tg_msg_id)
+                _save_ticker_state(session_id, tg_msg_id, ticker_pid)
 
     # 4. Intercepción de comandos (antes de pasar el prompt al modelo)
     if intercept_command(prompt):
