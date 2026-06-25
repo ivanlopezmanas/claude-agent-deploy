@@ -11,9 +11,7 @@
 #
 # Ejecutar EN EL HOST Proxmox (no dentro del LXC). Requiere: pct, pveam, rsync.
 #
-# Idempotente: guarda el progreso en /var/lib/install-agent/<agent>-<vmid>.checkpoint y salta
-# los pasos ya completados al re-ejecutar. En caso de fallo, para con un mensaje claro; no hace
-# rollback automático.
+# En caso de fallo, para con un mensaje claro; no hace rollback automático.
 
 set -euo pipefail
 
@@ -35,28 +33,16 @@ log_ok()   { echo "${GREEN}[OK]${RESET}   $*"; }
 log_warn() { echo "${YELLOW}[WARN]${RESET} $*"; }
 log_fail() { echo "${RED}[FAIL]${RESET} $*" >&2; }
 
-# El fichero de checkpoint se fija una vez recogidos AGENT_NAME y VMID (sección 1).
-CHECKPOINT_FILE=""
-
-checkpoint_done() { echo "$1=done" >> "${CHECKPOINT_FILE}"; }
-is_done()         { grep -q "^$1=done" "${CHECKPOINT_FILE}" 2>/dev/null; }
-
 # run_step ID DESC COMANDO [ARGS...]
-# Ejecuta el comando solo si el paso no está marcado como hecho. Para pasos complejos,
-# define una función step_XX_*() y pásala como comando.
+# Ejecuta el comando. Para pasos complejos, define una función step_XX_*() y pásala como comando.
 run_step() {
   local id=$1; local desc=$2; shift 2
-  if is_done "$id"; then
-    echo "${YELLOW}[SKIP]${RESET} $id — $desc"
-    return 0
-  fi
   echo ""
   echo "${BOLD}==> [$id] $desc${RESET}"
   if "$@"; then
-    checkpoint_done "$id"
     log_ok "$id"
   else
-    log_fail "$id falló. Corrígelo y re-ejecuta el script (los pasos completados se saltan)."
+    log_fail "$id falló. Corrígelo y re-ejecuta el script."
     exit 1
   fi
 }
@@ -172,11 +158,7 @@ if [[ ! -d "${DEPLOY_SRC}" ]]; then
   exit 1
 fi
 
-# Checkpoint y árbol de deploy en /var/lib/install-agent — sobreviven reinicios del host.
-# Los ficheros con secretos (SQL, env, json) sí van a /tmp (más seguros allí).
-mkdir -p /var/lib/install-agent
-CHECKPOINT_FILE="/var/lib/install-agent/${AGENT_NAME}-${VMID}.checkpoint"
-DEPLOY_TMP="/var/lib/install-agent/deploy-${AGENT_NAME}-${VMID}"
+DEPLOY_TMP="/tmp/deploy-${AGENT_NAME}-${VMID}"
 
 # Borrar ficheros temporales con secretos al salir (éxito o error)
 cleanup_tmp() {
@@ -204,15 +186,7 @@ cat <<EOF
   Bot token         : (oculto, ${#TELEGRAM_BOT_TOKEN} caracteres)
   Templates (src)   : ${DEPLOY_SRC}
   Template LXC      : ${PROXMOX_TEMPLATE}
-  Checkpoint        : ${CHECKPOINT_FILE}
 EOF
-
-if [[ -f "${CHECKPOINT_FILE}" ]]; then
-  echo ""
-  log_warn "Ya existe un checkpoint para este agente. Pasos ya completados:"
-  sed 's/=done//' "${CHECKPOINT_FILE}" | sed 's/^/    /'
-  log_warn "Esos pasos se saltarán. Borra ${CHECKPOINT_FILE} para empezar de cero."
-fi
 
 echo ""
 read -rp "¿Continuar? [s/N] " CONFIRM
@@ -220,9 +194,6 @@ if [[ ! "${CONFIRM}" =~ ^[sSyY]$ ]]; then
   echo "Abortado."
   exit 0
 fi
-
-# Crear el fichero de checkpoint si no existe (touch idempotente)
-touch "${CHECKPOINT_FILE}"
 
 # =============================================================================
 # SECCIÓN 2 — Fase A: LXC base (pasos 1-5)
@@ -700,7 +671,7 @@ run_step STEP_19_TO_26 "Copiar workspace y harness al LXC"     step_19_to_26_wor
 # SECCIÓN 7 — Fase F: Servicios y seguridad (pasos 27-36)
 # =============================================================================
 
-# Los pasos 27-29 leen de DEPLOY_TMP. Si la sección anterior fue saltada por el checkpoint
+# Los pasos 27-29 leen de DEPLOY_TMP. Si la sección anterior no se ejecutó,
 # o el árbol está incompleto (p.ej. borrado manual), lo regeneramos.
 # Comprobamos ficheros clave, no solo que el directorio exista.
 if [[ ! -f "${DEPLOY_TMP}/fase-0/etc/sudoers.d/${AGENT_NAME}" ]] || \
@@ -885,8 +856,6 @@ cat <<EOF
   - Agente   : ${AGENT_NAME}  (LXC vmid ${VMID}, hostname ${LXC_HOSTNAME})
   - IP       : ${IP_ADDRESS}
   - Servicio : claude-telegram.service
-  - Checkpoint: ${CHECKPOINT_FILE}
-
   ${BOLD}Acciones manuales pendientes / a confirmar${RESET}
   1. AppArmor: si está en modo COMPLAIN, tras ejercitar el agente sin denegaciones:
        pct exec ${VMID} -- aa-enforce /etc/apparmor.d/home.${AGENT_NAME}.claude
@@ -900,7 +869,6 @@ cat <<EOF
      PGBACKREST_*) no se han escrito: añádelos a /etc/${AGENT_NAME}/secrets.env cuando
      despliegues sus secciones (§8.3, §9.9, §11.2, §11.4).
 
-  Para re-ejecutar este script: salta automáticamente los pasos ya completados.
-  Para empezar de cero: borra ${CHECKPOINT_FILE}.
+  Para re-ejecutar este script: vuelve a lanzarlo desde el principio.
 
 EOF
