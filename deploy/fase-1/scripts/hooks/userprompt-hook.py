@@ -22,10 +22,11 @@ import urllib.parse
 sys.path.insert(0, "/home/<agent>/workspace/scripts/lib")
 from common import read_hook_input, inject_context, block, TELEGRAM_TURN_FLAG
 
-CLEAN_BIN   = "/home/<agent>/apps/bin/clean"
-SKILLS_DIR  = "/home/<agent>/claude/.claude/skills"
-AGENTS_DIR  = "/home/<agent>/claude/.claude/agents"
-TICKER_SCRIPT = "/home/<agent>/workspace/scripts/lib/ticker.py"
+CLEAN_BIN      = "/home/<agent>/apps/bin/clean"
+SKILLS_DIR     = "/home/<agent>/claude/.claude/skills"
+AGENTS_DIR     = "/home/<agent>/claude/.claude/agents"
+TICKER_SCRIPT  = "/home/<agent>/workspace/scripts/lib/ticker.py"
+CONTEXT_SCRIPT = "/home/<agent>/workspace/scripts/lib/context.py"
 
 ACCESS_PATTERNS = (
     "aprueba", "aprobar", "pairing", "empareja", "allowlist",
@@ -71,8 +72,18 @@ def intercept_command(prompt: str):
     cmd = prompt.strip().lower()
     # El cuerpo puede venir envuelto en un tag <channel>; extraemos la primera línea útil.
     if "/context" in cmd and cmd.replace("/context", "").strip(" \t") in ("", "<", ">"):
-        _respond_and_stop("Uso de contexto: ejecuta el resumen de la sesión actual desde el log.")
-        return True
+        try:
+            subprocess.Popen(
+                [sys.executable, CONTEXT_SCRIPT, "--mode", "command"],
+                start_new_session=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
+        print(json.dumps({"continue": False}, ensure_ascii=False))
+        sys.exit(0)
     if "/skills" in cmd:
         skills = list_dir_names(SKILLS_DIR)
         body = "Skills disponibles:\n" + ("\n".join(f"- {s}" for s in skills) if skills else "(ninguna)")
