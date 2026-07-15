@@ -546,13 +546,19 @@ prepare_deploy_tmp() {
   mkdir -p "${DEPLOY_TMP}"
   rsync -a "${DEPLOY_SRC}/" "${DEPLOY_TMP}/"
 
+  # IP sin máscara CIDR, para mostrarla limpia en el CLAUDE.md.
+  local IP_ADDRESS_BARE="${IP_ADDRESS%%/*}"
+
   # Sustitución global de placeholders en el CONTENIDO de todos los ficheros.
   # Orden importante: <AGENT> y <Agent> antes que <agent> (todos son distintos
   # literalmente, pero mantenemos el orden por claridad).
   find "${DEPLOY_TMP}/" -type f -print0 | xargs -0 sed -i \
     -e "s|<AGENT>|${AGENT_UPPER}|g" \
     -e "s|<Agent>|${AGENT_TITLE}|g" \
-    -e "s|<agent>|${AGENT_NAME}|g"
+    -e "s|<agent>|${AGENT_NAME}|g" \
+    -e "s|<vmid>|${VMID}|g" \
+    -e "s|<ip_address>|${IP_ADDRESS_BARE}|g" \
+    -e "s|<hostname>|${LXC_HOSTNAME}|g"
 
   # Nota v2: el bloque de onboarding NO se inyecta aquí.
   # Se añade al CLAUDE.md del LXC en step_20_telegram_access, después del OAuth y de
