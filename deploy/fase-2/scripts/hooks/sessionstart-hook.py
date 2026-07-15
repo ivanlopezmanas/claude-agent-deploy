@@ -7,14 +7,16 @@ No bloquea. FAIL-OPEN. Parte que pertenece al §4 (harness):
   2. Registra el inicio de sesión en el log de permisos.
   3. Limpia ficheros-bandera huérfanos de /tmp/<agent>-* de sesiones anteriores
      (evita que una bandera vieja dispare un rewake espurio).
-  4. Reserva el punto de integración de §6 Memoria (carga top-N): no-op en F1-F4.
+  4. Envía mensaje de bienvenida generado por Haiku (asíncrono, FAIL-OPEN).
 """
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
-CLAUDE_MD = Path("/home/<agent>/claude/CLAUDE.md")
+CLAUDE_MD       = Path("/home/<agent>/claude/CLAUDE.md")
+GREETING_SCRIPT = "/home/<agent>/workspace/scripts/lib/greeting.py"
 
 ONBOARDING_CONTEXT = (
     "PRIMER ARRANQUE — ONBOARDING OBLIGATORIO\n\n"
@@ -76,6 +78,19 @@ try:
             pass
 
     # 3. Punto de integración §6 Memoria (carga de contexto): no-op en F1-F4.
+
+    # 4. Mensaje de bienvenida generado por Haiku (background, fail-open).
+    try:
+        subprocess.Popen(
+            [sys.executable, GREETING_SCRIPT],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
+
 except Exception:
     pass
 sys.exit(0)

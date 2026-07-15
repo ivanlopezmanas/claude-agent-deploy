@@ -11,6 +11,7 @@ import sys
 import json
 import time
 import datetime
+import subprocess
 from pathlib import Path
 
 # ---------------------------------------------------------------- Constantes
@@ -21,6 +22,7 @@ def _tmp(name: str) -> Path:
 
 LOG_PATH            = Path("/home/<agent>/logs/<agent>-permissions.log")
 WORKSPACE_TABLE     = Path("/home/<agent>/workspace/scripts/lib/workspace.json")
+SETTINGS_BACKGROUND = Path("/home/<agent>/claude/.claude/settings-background.json")
 TELEGRAM_TURN_FLAG  = _tmp("<agent>-telegram-turn")
 REWAKE_COUNTER      = _tmp("<agent>-stop-rewake-counter")
 TICKER_STATE        = _tmp("<agent>-ticker-state.json")
@@ -72,6 +74,36 @@ def context() -> str:
 
 def is_main_context() -> bool:
     return context() == "main"
+
+# ---------------------------------------------------------------- Sub-agentes aislados (§7.2)
+def call_isolated_agent(prompt: str, *, agent: str = None, model: str = None, timeout: int = 60) -> str:
+    """Lanza `claude --print` completamente aislado del canal principal.
+
+    Único punto de entrada permitido para invocar Claude desde un hook o script
+    (regla inviolable del kernel). Combina los tres mecanismos de §7.2:
+    --strict-mcp-config (cierra todos los MCP del usuario, incluido Telegram),
+    --settings settings-background.json (sin hooks Session*/Notification/
+    PostToolUse — no hay bucle posible aunque el sub-proceso abra su propia
+    sesión) y <AGENT>_CONTEXT=subagent como señal explícita adicional.
+
+    FAIL-OPEN: cualquier fallo (timeout, exit != 0, excepción) devuelve None,
+    nunca propaga. El caller decide qué hacer con un resultado vacío.
+    """
+    cmd = ["claude", "--print", "--strict-mcp-config", "--settings", str(SETTINGS_BACKGROUND)]
+    if agent:
+        cmd += ["--agent", agent]
+    if model:
+        cmd += ["--model", model]
+    env = dict(os.environ)
+    env["<AGENT>_CONTEXT"] = "subagent"
+    try:
+        result = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
+                                 timeout=timeout, env=env)
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip()
+    except Exception:
+        return None
 
 # ---------------------------------------------------------------- I/O hook
 def read_hook_input() -> dict:

@@ -28,6 +28,54 @@ class TestContext:
         assert nc.is_main_context() is True
 
 
+# ----------------------------------------------------------------- call_isolated_agent()
+class _FakeCompleted:
+    def __init__(self, returncode=0, stdout="ok"):
+        self.returncode = returncode
+        self.stdout = stdout
+
+
+class TestCallIsolatedAgent:
+    def test_builds_isolated_command(self, monkeypatch):
+        captured = {}
+
+        def fake_run(cmd, input, capture_output, text, timeout, env):
+            captured["cmd"] = cmd
+            captured["env"] = env
+            return _FakeCompleted(0, "hola")
+
+        monkeypatch.setattr(nc.subprocess, "run", fake_run)
+        result = nc.call_isolated_agent("hola", model="haiku")
+
+        assert result == "hola"
+        assert captured["cmd"][:4] == ["claude", "--print", "--strict-mcp-config", "--settings"]
+        assert "--model" in captured["cmd"] and "haiku" in captured["cmd"]
+        assert captured["env"]["<AGENT>_CONTEXT"] == "subagent"
+
+    def test_agent_flag_passed(self, monkeypatch):
+        captured = {}
+
+        def fake_run(cmd, input, capture_output, text, timeout, env):
+            captured["cmd"] = cmd
+            return _FakeCompleted(0, "ok")
+
+        monkeypatch.setattr(nc.subprocess, "run", fake_run)
+        nc.call_isolated_agent("hola", agent="session-summarizer")
+        assert "--agent" in captured["cmd"] and "session-summarizer" in captured["cmd"]
+
+    def test_nonzero_exit_returns_none(self, monkeypatch):
+        monkeypatch.setattr(nc.subprocess, "run",
+                             lambda *a, **k: _FakeCompleted(1, "error"))
+        assert nc.call_isolated_agent("hola") is None
+
+    def test_exception_returns_none(self, monkeypatch):
+        def raise_timeout(*a, **k):
+            raise nc.subprocess.TimeoutExpired(cmd="claude", timeout=60)
+
+        monkeypatch.setattr(nc.subprocess, "run", raise_timeout)
+        assert nc.call_isolated_agent("hola") is None
+
+
 # ----------------------------------------------------------------- lookup_tier()
 class TestLookupTier:
     def test_default_t1_when_no_match(self):
