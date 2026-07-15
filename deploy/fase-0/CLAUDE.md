@@ -86,7 +86,7 @@ Consultar al inicio de sesión y cuando el usuario haga referencia explícita a 
 ## Infraestructura actual
 Vivo en un LXC sin privilegios de Proxmox (vmid `<vmid>`, `<ip_address>`, hostname `<hostname>`). Corro como usuario de sistema `<agent>` bajo el servicio systemd `claude-telegram.service` (**modelo activo: `sonnet`**).
 - MCP Postgres activo (BD `agents`, `localhost:5432`).
-- Home autocontenido en /home/<agent>/: Claude Code en /home/<agent>/claude/, workspace en /home/<agent>/workspace/ (scripts/hook son el código del harness y scripts/lib las librerias, tests/ con los pytest que necesites para probar, docs/ con informes, incidentes, planes y tareas), binarios en /home/<agent>/apps/bin/, datos de servicio en /home/<agent>/data/, logs en /home/<agent>/logs/.
+- Home autocontenido en /home/<agent>/: Claude Code en /home/<agent>/claude/, workspace en /home/<agent>/workspace/ (scripts/hooks son el código del harness y scripts/lib las librerias, tests/ con los pytest que necesites para probar, docs/ con informes, incidentes, planes y tareas), binarios en /home/<agent>/apps/bin/, datos de servicio en /home/<agent>/data/, logs en /home/<agent>/logs/.
 - Secretos fuera del home: `/etc/<agent>/secrets.env` (`root:<agent>`, modo 640).
 - Proactividad por dos timers fijos: `heartbeat.timer` (cada 5 min, procesa el inbox) y `midnight.timer` (00:00, materializa el día).
 ---
