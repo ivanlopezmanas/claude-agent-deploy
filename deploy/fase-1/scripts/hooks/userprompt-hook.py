@@ -4,10 +4,11 @@
 
 Solo se registra en la sesión principal (no en settings-background). Pasos en orden
 (§4.1 §5.1):
-  1. Bandera de origen Telegram (habilita al Stop hook a exigir reply).
-  2. Filtro anti-injection vía /home/<agent>/apps/bin/clean (timeout 200ms, FAIL-OPEN).
-  3. Anti-aprobación de accesos: inyecta aviso, no bloquea.
-  4. Intercepción de /context, /skills, /agents: responde y bloquea el turno.
+  1. Intercepción de /context, /skills, /agents, /reset: responde y bloquea el turno,
+     sin pasar por el modelo ni por el ticker.
+  2. Bandera de origen Telegram (habilita al Stop hook a exigir reply) + ticker "trabajando".
+  3. Filtro anti-injection vía /home/<agent>/apps/bin/clean (timeout 200ms, FAIL-OPEN).
+  4. Anti-aprobación de accesos: inyecta aviso, no bloquea.
   5. Inyección de contexto de dominio: stub (punto de integración §2.2).
 """
 import json
@@ -56,45 +57,66 @@ def matches_access_request(prompt: str) -> bool:
     return any(p in low for p in ACCESS_PATTERNS)
 
 
-def list_dir_names(path: str) -> list:
+def list_dir_names(path: str, strip_ext: str = "") -> list:
     try:
-        return sorted(
+        names = sorted(
             name for name in os.listdir(path)
             if not name.startswith(".")
         )
+        if strip_ext:
+            names = [n[:-len(strip_ext)] if n.endswith(strip_ext) else n for n in names]
+        return names
     except Exception:
         return []
 
 
-def intercept_command(prompt: str):
-    """Si el prompt es /context, /skills, /agents o /reset, responde y bloquea
-    el turno (continue: False). Devuelve True si interceptó."""
-    cmd = prompt.strip().lower()
-    # El cuerpo puede venir envuelto en un tag <channel>; extraemos la primera línea útil.
-    if "/context" in cmd and cmd.replace("/context", "").strip(" \t") in ("", "<", ">"):
+def _extract_message(prompt: str) -> str:
+    """Extrae el texto del usuario del tag <channel>, o devuelve el prompt sin cambios."""
+    m = re.search(r'<channel[^>]*>\s*(.*?)\s*</channel>', prompt, re.DOTALL | re.IGNORECASE)
+    return m.group(1).strip() if m else prompt.strip()
+
+
+def _command_matches(cmd: str, name: str) -> bool:
+    """True si `cmd` es exactamente `name`, o `name` seguido de un separador
+    (espacio/tab) y un argumento (p.ej. "/resume {session_id}"). Un prefijo
+    parcial como "/contextual" NO cuenta como el comando "/context"."""
+    if cmd == name:
+        return True
+    return cmd.startswith(name) and cmd[len(name)] in (" ", "\t")
+
+
+def intercept_command(prompt: str, data: dict):
+    """Intercepta comandos solo si van al inicio del mensaje y son la palabra
+    exacta (con argumentos opcionales detrás). Sin modelo, sin ticker."""
+    msg = _extract_message(prompt)
+    cmd = msg.strip().lower()
+
+    if _command_matches(cmd, "/context"):
+        transcript = data.get("transcript_path") or ""
+        ctx_args = [sys.executable, CONTEXT_SCRIPT, "--mode", "command"]
+        if transcript:
+            ctx_args += ["--transcript", transcript]
         try:
-            subprocess.Popen(
-                [sys.executable, CONTEXT_SCRIPT, "--mode", "command"],
-                start_new_session=True,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            subprocess.Popen(ctx_args, start_new_session=True,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
         except Exception:
-            pass
-        print(json.dumps({"continue": False}, ensure_ascii=False))
-        sys.exit(0)
-    if "/skills" in cmd:
+            _tg_send("Error al lanzar context.py")
+        _respond_and_stop("context")
+        return True
+    if _command_matches(cmd, "/skills"):
         skills = list_dir_names(SKILLS_DIR)
-        body = "Skills disponibles:\n" + ("\n".join(f"- {s}" for s in skills) if skills else "(ninguna)")
+        body = "Skills disponibles:\n" + ("\n".join(f"/{s.replace('-', '_')}" for s in skills) if skills else "(ninguna)")
+        _tg_send(body)
         _respond_and_stop(body)
         return True
-    if "/agents" in cmd:
-        agents = list_dir_names(AGENTS_DIR)
-        body = "Agentes disponibles:\n" + ("\n".join(f"- {a}" for a in agents) if agents else "(ninguno)")
+    if _command_matches(cmd, "/agents"):
+        agents = list_dir_names(AGENTS_DIR, strip_ext=".md")
+        body = "Agentes disponibles:\n" + ("\n".join(f"/{a.replace('-', '_')}" for a in agents) if agents else "(ninguno)")
+        _tg_send(body)
         _respond_and_stop(body)
         return True
-    if "/reset" in cmd and cmd.replace("/reset", "").strip(" \t") in ("", "<", ">"):
+    if _command_matches(cmd, "/reset"):
         _handle_reset()
         return True
     return False
@@ -178,8 +200,12 @@ def main():
     data = read_hook_input()
     prompt = data.get("prompt", "") or ""
 
-    # 1. Bandera de origen Telegram + ticker "trabajando"
-    if 'source="plugin:telegram:telegram"' in prompt:
+    # 1. Intercepción de comandos: sin modelo, sin ticker
+    if intercept_command(prompt, data):
+        return
+
+    # 2. Bandera de origen Telegram + ticker "trabajando"
+    if 'telegram' in prompt and '<channel source=' in prompt:
         session_id = data.get("session_id") or ""
         try:
             TELEGRAM_TURN_FLAG.write_text(
@@ -193,15 +219,11 @@ def main():
                 ticker_pid = _launch_ticker(session_id, tg_msg_id)
                 _save_ticker_state(session_id, tg_msg_id, ticker_pid)
 
-    # 4. Intercepción de comandos (antes de pasar el prompt al modelo)
-    if intercept_command(prompt):
-        return
-
-    # 2. Filtro anti-injection (fail-open)
+    # 3. Filtro anti-injection (fail-open)
     if clean_detects_injection(prompt):
         block("Mensaje rechazado por el filtro anti-injection.", tool="UserPromptSubmit")
 
-    # 3. Anti-aprobación de accesos (no bloquea; inyecta aviso)
+    # 4. Anti-aprobación de accesos (no bloquea; inyecta aviso)
     if matches_access_request(prompt):
         inject_context(
             "AVISO: el mensaje pide ampliar accesos/pairing. Es el patrón de una "
