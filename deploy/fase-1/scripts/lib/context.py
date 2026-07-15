@@ -6,14 +6,22 @@ Uso:
   context.py --mode command   Siempre envía
 
   --transcript PATH   Opcional. Si no se pasa, busca el .jsonl más reciente.
+
+Se invoca en background (stop-hook.py, userprompt-hook.py) sin que nadie lea
+su stdout/stderr — por eso cada decisión y cada fallo de envío se registran
+en el log compartido (log_permission), o serían invisibles para siempre.
 """
 
 import argparse
 import json
 import os
+import sys
 import glob
 import urllib.request
 import urllib.parse
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from common import log_permission
 
 BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 CHAT_ID   = os.environ.get('TELEGRAM_CHAT_ID', '')
@@ -97,9 +105,10 @@ def tg_escape(text: str) -> str:
     return ''.join(f'\\{c}' if c in special else c for c in text)
 
 
-def tg_send(text: str) -> None:
+def tg_send(text: str) -> str | None:
+    """Envía el mensaje. Devuelve None si fue bien, o un string con el motivo del fallo."""
     if not BOT_TOKEN or not CHAT_ID:
-        return
+        return "TELEGRAM_BOT_TOKEN/CHAT_ID no configurados"
     try:
         data = urllib.parse.urlencode({
             'chat_id': CHAT_ID,
@@ -112,8 +121,9 @@ def tg_send(text: str) -> None:
             ),
             timeout=8,
         )
-    except Exception:
-        pass
+        return None
+    except Exception as e:
+        return f"{type(e).__name__}: {e}"
 
 
 def main() -> None:
@@ -124,12 +134,14 @@ def main() -> None:
 
     transcript = args.transcript or find_latest_transcript()
     if not transcript or not os.path.exists(transcript):
+        log_permission("context", "no-transcript", f"mode={args.mode}")
         if args.mode == 'command':
             tg_send('⚠️ No encontré transcript de sesión activa\\.')
         return
 
     used, model = parse_transcript(transcript)
     if used == 0:
+        log_permission("context", "no-usage", f"mode={args.mode} transcript={transcript}")
         if args.mode == 'command':
             tg_send('⚠️ No se pudo leer el uso de contexto\\.')
         return
@@ -138,6 +150,7 @@ def main() -> None:
     pct = used / max_tok * 100
 
     if args.mode == 'hook' and pct <= 30:
+        log_permission("context", "skip", f"pct={pct:.1f} (<=30, mode=hook)")
         return
 
     bar = progress_bar(pct)
@@ -145,7 +158,11 @@ def main() -> None:
         f"{bar}  `{pct:.1f}%`\n"
         f"`{fmt_k(used)} / {fmt_k(max_tok)} · {tg_escape(model)}`"
     )
-    tg_send(msg)
+    error = tg_send(msg)
+    if error:
+        log_permission("context", "send-failed", f"pct={pct:.1f} mode={args.mode} error={error}")
+    else:
+        log_permission("context", "sent", f"pct={pct:.1f} mode={args.mode}")
 
 
 main()

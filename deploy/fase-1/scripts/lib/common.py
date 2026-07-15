@@ -302,17 +302,95 @@ def score_tool_call(tool: str, args: dict, path: str = "") -> tuple:
     return score, "Block"
 
 # ---------------------------------------------------------------- Transcript (Stop hook)
-def reply_in_transcript(transcript_path: str) -> bool:
-    """True si el último turno emitió un reply de Telegram.
+def _is_telegram_message(content) -> bool:
+    def _has_tag(text):
+        return '<channel' in text and 'plugin:telegram:telegram' in text
 
-    TODO (antes de cerrar F2): parsear solo los eventos del último turno
-    (desde el último UserPromptSubmit) en vez de todo el transcript.
+    if isinstance(content, str):
+        return _has_tag(content)
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get('type') == 'text':
+                if _has_tag(block.get('text', '')):
+                    return True
+    return False
+
+def _content_to_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [b.get('text', '') for b in content
+                 if isinstance(b, dict) and b.get('type') == 'text' and b.get('text')]
+        return '\n'.join(parts)
+    return ''
+
+def check_reply_status(transcript_path: str) -> tuple:
+    """Escanea los mensajes posteriores al último mensaje de Telegram del transcript.
+
+    Devuelve (reply_ok, last_assistant_text):
+    - reply_ok: True solo si se llamó a la tool de reply de Telegram y su
+      tool_result no fue error (matching por tool_use_id, no una simple
+      búsqueda de substring en todo el fichero — un reply de una pregunta
+      anterior en la misma sesión no debe contar para la actual).
+    - last_assistant_text: último texto de asistente visto tras ese mensaje,
+      para que el Stop hook pueda rescatarlo si el reply nunca llega.
     """
     if not transcript_path or not os.path.exists(transcript_path):
-        return False
+        return False, ""
+
+    messages = []
     try:
-        with open(transcript_path) as f:
-            content = f.read()
-        return "mcp__plugin_telegram_telegram__reply" in content
+        with open(transcript_path, encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    messages.append(json.loads(line))
+                except Exception:
+                    continue
     except Exception:
-        return False
+        return False, ""
+
+    last_tg_idx = -1
+    for i, msg in enumerate(messages):
+        if msg.get('type') != 'user':
+            continue
+        content = (msg.get('message') or {}).get('content', '')
+        if _is_telegram_message(content):
+            last_tg_idx = i
+
+    if last_tg_idx == -1:
+        return False, ""
+
+    pending_reply_ids = set()
+    reply_ok = False
+    last_text = ""
+
+    for msg in messages[last_tg_idx + 1:]:
+        msg_type = msg.get('type')
+        content = (msg.get('message') or {}).get('content', [])
+
+        if msg_type == 'assistant':
+            text = _content_to_text(content)
+            if text:
+                last_text = text
+            if isinstance(content, list):
+                for block in content:
+                    if (isinstance(block, dict)
+                            and block.get('type') == 'tool_use'
+                            and block.get('name') == 'mcp__plugin_telegram_telegram__reply'
+                            and block.get('id') is not None):
+                        pending_reply_ids.add(block['id'])
+
+        elif msg_type == 'user' and pending_reply_ids:
+            if isinstance(content, list):
+                for block in content:
+                    if (isinstance(block, dict)
+                            and block.get('type') == 'tool_result'
+                            and block.get('tool_use_id') in pending_reply_ids):
+                        if not block.get('is_error', False):
+                            reply_ok = True
+                        pending_reply_ids.discard(block.get('tool_use_id'))
+
+    return reply_ok, last_text

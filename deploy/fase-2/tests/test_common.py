@@ -150,3 +150,111 @@ def test_log_permission_never_raises(monkeypatch, tmp_path):
     # Aunque la ruta sea inescribible, no debe propagar.
     monkeypatch.setattr(nc, "LOG_PATH", tmp_path / "sub" / "log.jsonl")
     nc.log_permission("Read", "allow", "x")  # no exception
+
+
+# ----------------------------------------------------------------- check_reply_status()
+def _tg_msg(text, msg_id="1"):
+    return {
+        "type": "user",
+        "message": {
+            "content": f'<channel source="plugin:telegram:telegram" chat_id="123" message_id="{msg_id}">{text}</channel>'
+        }
+    }
+
+
+def _assistant_reply(tool_id="t1", text="respuesta"):
+    return {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {"type": "text", "text": text},
+                {"type": "tool_use", "id": tool_id,
+                 "name": "mcp__plugin_telegram_telegram__reply",
+                 "input": {"chat_id": "123", "text": text}}
+            ]
+        }
+    }
+
+
+def _assistant_text(text):
+    return {
+        "type": "assistant",
+        "message": {"content": [{"type": "text", "text": text}]}
+    }
+
+
+def _tool_result(tool_id="t1", is_error=False):
+    return {
+        "type": "user",
+        "message": {
+            "content": [{"type": "tool_result", "tool_use_id": tool_id, "is_error": is_error}]
+        }
+    }
+
+
+def _write_transcript(tmp_path, messages):
+    p = tmp_path / "transcript.jsonl"
+    p.write_text("\n".join(json.dumps(m) for m in messages) + "\n")
+    return str(p)
+
+
+class TestCheckReplyStatus:
+    def test_no_transcript_path(self):
+        assert nc.check_reply_status("") == (False, "")
+
+    def test_nonexistent_transcript(self):
+        assert nc.check_reply_status("/nonexistent/path.jsonl") == (False, "")
+
+    def test_no_telegram_message(self, tmp_path):
+        tp = _write_transcript(tmp_path, [{"type": "system", "message": {"content": "boot"}}])
+        assert nc.check_reply_status(tp) == (False, "")
+
+    def test_successful_reply(self, tmp_path):
+        tp = _write_transcript(tmp_path, [
+            _tg_msg("hola"),
+            _assistant_reply("t1", "hola de vuelta"),
+            _tool_result("t1", is_error=False),
+        ])
+        reply_ok, last_text = nc.check_reply_status(tp)
+        assert reply_ok is True
+
+    def test_reply_tool_result_error_not_ok(self, tmp_path):
+        tp = _write_transcript(tmp_path, [
+            _tg_msg("hola"),
+            _assistant_reply("t1", "intento fallido"),
+            _tool_result("t1", is_error=True),
+        ])
+        reply_ok, last_text = nc.check_reply_status(tp)
+        assert reply_ok is False
+        assert last_text == "intento fallido"
+
+    def test_no_reply_returns_last_assistant_text(self, tmp_path):
+        tp = _write_transcript(tmp_path, [
+            _tg_msg("pregunta"),
+            _assistant_text("esto no llegó a Telegram"),
+        ])
+        reply_ok, last_text = nc.check_reply_status(tp)
+        assert reply_ok is False
+        assert last_text == "esto no llegó a Telegram"
+
+    def test_only_last_tg_message_scopes_the_check(self, tmp_path):
+        # Un reply exitoso a un mensaje ANTERIOR no debe contar para el actual
+        # (el bug de scoping original: buscaba en todo el transcript).
+        tp = _write_transcript(tmp_path, [
+            _tg_msg("primero", msg_id="1"),
+            _assistant_reply("t1", "respuesta al primero"),
+            _tool_result("t1", is_error=False),
+            _tg_msg("segundo", msg_id="2"),
+            _assistant_text("sin reply para el segundo"),
+        ])
+        reply_ok, last_text = nc.check_reply_status(tp)
+        assert reply_ok is False
+        assert last_text == "sin reply para el segundo"
+
+    def test_malformed_lines_are_skipped(self, tmp_path):
+        p = tmp_path / "transcript.jsonl"
+        p.write_text("not json\n" + json.dumps(_tg_msg("hola")) + "\n" +
+                     json.dumps(_assistant_reply("t1", "ok")) + "\n" +
+                     json.dumps(_tool_result("t1", is_error=False)) + "\n")
+        reply_ok, _ = nc.check_reply_status(str(p))
+        assert reply_ok is True
