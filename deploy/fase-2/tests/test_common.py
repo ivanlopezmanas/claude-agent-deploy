@@ -52,7 +52,7 @@ class TestCallIsolatedAgent:
         assert "--model" in captured["cmd"] and "haiku" in captured["cmd"]
         assert captured["env"]["<AGENT>_CONTEXT"] == "subagent"
 
-    def test_extra_args_appended(self, monkeypatch):
+    def test_mcp_config_appended(self, monkeypatch):
         captured = {}
 
         def fake_run(cmd, input, capture_output, text, timeout, env):
@@ -61,10 +61,43 @@ class TestCallIsolatedAgent:
 
         monkeypatch.setattr(nc.subprocess, "run", fake_run)
         nc.call_isolated_agent("hola", agent="the-chronicler",
-                                extra_args=["--mcp-config", "/path/mcp-postgres-only.json"])
+                                mcp_config="/path/mcp-postgres-only.json")
         assert captured["cmd"][-2:] == ["--mcp-config", "/path/mcp-postgres-only.json"]
 
-    def test_no_extra_args_by_default(self, monkeypatch):
+    def test_allowed_tools_joined_with_commas(self, monkeypatch):
+        captured = {}
+
+        def fake_run(cmd, input, capture_output, text, timeout, env):
+            captured["cmd"] = cmd
+            return _FakeCompleted(0, "ok")
+
+        monkeypatch.setattr(nc.subprocess, "run", fake_run)
+        nc.call_isolated_agent("hola", allowed_tools=["Read", "WebSearch"])
+        assert captured["cmd"][-2:] == ["--allowed-tools", "Read,WebSearch"]
+
+    def test_max_turns_appended(self, monkeypatch):
+        captured = {}
+
+        def fake_run(cmd, input, capture_output, text, timeout, env):
+            captured["cmd"] = cmd
+            return _FakeCompleted(0, "ok")
+
+        monkeypatch.setattr(nc.subprocess, "run", fake_run)
+        nc.call_isolated_agent("hola", max_turns=10)
+        assert captured["cmd"][-2:] == ["--max-turns", "10"]
+
+    def test_output_format_appended(self, monkeypatch):
+        captured = {}
+
+        def fake_run(cmd, input, capture_output, text, timeout, env):
+            captured["cmd"] = cmd
+            return _FakeCompleted(0, "ok")
+
+        monkeypatch.setattr(nc.subprocess, "run", fake_run)
+        nc.call_isolated_agent("hola", output_format="json")
+        assert captured["cmd"][-2:] == ["--output-format", "json"]
+
+    def test_no_optional_flags_by_default(self, monkeypatch):
         captured = {}
 
         def fake_run(cmd, input, capture_output, text, timeout, env):
@@ -73,7 +106,8 @@ class TestCallIsolatedAgent:
 
         monkeypatch.setattr(nc.subprocess, "run", fake_run)
         nc.call_isolated_agent("hola")
-        assert "--mcp-config" not in captured["cmd"]
+        for flag in ("--mcp-config", "--allowed-tools", "--max-turns", "--output-format"):
+            assert flag not in captured["cmd"]
 
     def test_agent_flag_passed(self, monkeypatch):
         captured = {}

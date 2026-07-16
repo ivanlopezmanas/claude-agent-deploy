@@ -77,7 +77,9 @@ def is_main_context() -> bool:
 
 # ---------------------------------------------------------------- Sub-agentes aislados (§7.2)
 def call_isolated_agent(prompt: str, *, agent: str = None, model: str = None,
-                         extra_args: list = None, timeout: int = 60) -> str:
+                         mcp_config: str = None, allowed_tools: list = None,
+                         max_turns: int = None, output_format: str = None,
+                         timeout: int = 60) -> str:
     """Lanza `claude --print` completamente aislado del canal principal.
 
     Único punto de entrada permitido para invocar Claude desde un hook o script
@@ -87,9 +89,18 @@ def call_isolated_agent(prompt: str, *, agent: str = None, model: str = None,
     PostToolUse — no hay bucle posible aunque el sub-proceso abra su propia
     sesión) y <AGENT>_CONTEXT=subagent como señal explícita adicional.
 
-    extra_args: flags adicionales para casos que necesitan más que el
-    aislamiento base (p.ej. un --mcp-config extra para un agente que necesita
-    postgres). Vacío por defecto — no añade nada si el caller no lo pide.
+    - agent: nombre del agente configurado a usar (trae su propio modelo/
+      allowlist/prompt, ej. "the-chronicler").
+    - model: fuerza un modelo cuando no hay agente dedicado (ej. saludo suelto
+      con Haiku).
+    - mcp_config: MCP adicional sobre el aislamiento base (ej. postgres-only
+      para que the-chronicler pueda escribir memorias).
+    - allowed_tools: restringe/amplía herramientas para esta llamada concreta,
+      sin tocar el .md del agente.
+    - max_turns: tope de turnos/tool calls del propio agente — defensa extra
+      contra un bucle de tool-calls, además del timeout (que corta por tiempo,
+      no por número de pasos).
+    - output_format: "text" (default) | "json" | "stream-json".
 
     FAIL-OPEN: cualquier fallo (timeout, exit != 0, excepción) devuelve None,
     nunca propaga. El caller decide qué hacer con un resultado vacío.
@@ -99,8 +110,14 @@ def call_isolated_agent(prompt: str, *, agent: str = None, model: str = None,
         cmd += ["--agent", agent]
     if model:
         cmd += ["--model", model]
-    if extra_args:
-        cmd += list(extra_args)
+    if mcp_config:
+        cmd += ["--mcp-config", mcp_config]
+    if allowed_tools:
+        cmd += ["--allowed-tools", ",".join(allowed_tools)]
+    if max_turns:
+        cmd += ["--max-turns", str(max_turns)]
+    if output_format:
+        cmd += ["--output-format", output_format]
     env = dict(os.environ)
     env["<AGENT>_CONTEXT"] = "subagent"
     try:

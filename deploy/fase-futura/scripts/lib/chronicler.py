@@ -72,7 +72,7 @@ def call_chronicler(transcript_text):
     result = call_isolated_agent(
         prompt,
         agent='the-chronicler',
-        extra_args=['--mcp-config', MCP_PG],
+        mcp_config=MCP_PG,
         timeout=120,
     )
     if result is None:
