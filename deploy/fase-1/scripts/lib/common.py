@@ -76,7 +76,8 @@ def is_main_context() -> bool:
     return context() == "main"
 
 # ---------------------------------------------------------------- Sub-agentes aislados (§7.2)
-def call_isolated_agent(prompt: str, *, agent: str = None, model: str = None, timeout: int = 60) -> str:
+def call_isolated_agent(prompt: str, *, agent: str = None, model: str = None,
+                         extra_args: list = None, timeout: int = 60) -> str:
     """Lanza `claude --print` completamente aislado del canal principal.
 
     Único punto de entrada permitido para invocar Claude desde un hook o script
@@ -86,6 +87,10 @@ def call_isolated_agent(prompt: str, *, agent: str = None, model: str = None, ti
     PostToolUse — no hay bucle posible aunque el sub-proceso abra su propia
     sesión) y <AGENT>_CONTEXT=subagent como señal explícita adicional.
 
+    extra_args: flags adicionales para casos que necesitan más que el
+    aislamiento base (p.ej. un --mcp-config extra para un agente que necesita
+    postgres). Vacío por defecto — no añade nada si el caller no lo pide.
+
     FAIL-OPEN: cualquier fallo (timeout, exit != 0, excepción) devuelve None,
     nunca propaga. El caller decide qué hacer con un resultado vacío.
     """
@@ -94,6 +99,8 @@ def call_isolated_agent(prompt: str, *, agent: str = None, model: str = None, ti
         cmd += ["--agent", agent]
     if model:
         cmd += ["--model", model]
+    if extra_args:
+        cmd += list(extra_args)
     env = dict(os.environ)
     env["<AGENT>_CONTEXT"] = "subagent"
     try:

@@ -21,10 +21,11 @@ import urllib.parse
 import urllib.request
 from datetime import datetime
 
+sys.path.insert(0, "/home/<agent>/workspace/scripts/lib")
+from common import call_isolated_agent
+
 LOG = '/home/<agent>/logs/<agent>-session-end.log'
 DISTILL_SCRIPT = '/home/<agent>/workspace/scripts/lib/distill-transcript.py'
-CLAUDE_BIN = '/home/<agent>/claude/.local/bin/claude'
-SETTINGS_BG = '/home/<agent>/claude/.claude/settings-background.json'
 MCP_PG = '/home/<agent>/workspace/scripts/hooks/<agent>-mcp-postgres-only.json'
 IMPROVEMENTS_DIR = '/home/<agent>/workspace/docs/improvements'
 DB_DSN = os.environ.get('POSTGRES_CONNECTION_STRING', '')
@@ -68,24 +69,16 @@ def call_chronicler(transcript_text):
         "La primera línea debe ser [ y la última ].\n\n"
         f"{transcript_text}"
     )
-    env = os.environ.copy()
-    env['<AGENT>_CONTEXT'] = 'background'
-    env['<AGENT>_HOOK_RUNNING'] = '1'
-    env['HOME'] = '/home/<agent>/claude'
-
-    result = subprocess.run(
-        [CLAUDE_BIN, '--print',
-         '--agent', 'the-chronicler',
-         '--strict-mcp-config',
-         '--settings', SETTINGS_BG,
-         '--mcp-config', MCP_PG,
-         prompt],
-        capture_output=True, text=True, timeout=120, env=env
+    result = call_isolated_agent(
+        prompt,
+        agent='the-chronicler',
+        extra_args=['--mcp-config', MCP_PG],
+        timeout=120,
     )
-    if result.returncode != 0:
-        log(f"[ERROR] claude --print rc={result.returncode}: {result.stderr[:200]}")
+    if result is None:
+        log("[ERROR] call_isolated_agent devolvió None")
         return None
-    return result.stdout.strip()
+    return result
 
 
 def parse_memories(raw):
