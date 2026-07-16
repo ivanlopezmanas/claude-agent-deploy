@@ -40,8 +40,8 @@ estructuradas para insertar en `agent_memory`.
 ## Formato de inserción
 
 ```sql
-INSERT INTO agent_memory (session_id, category, keywords, text)
-VALUES ('<session_id>', '<category>', ARRAY['kw1','kw2'], '<text>');
+INSERT INTO agent_memory (session_id, user_id, category, keywords, content)
+VALUES ('<session_id>', <user_id>, '<category>', ARRAY['kw1','kw2'], '<content>');
 ```
 
 ## loop_config

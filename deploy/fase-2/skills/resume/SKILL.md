@@ -70,7 +70,13 @@ No leas el transcript en el contexto principal — eso lo hace el subagente.
 
 Solo si no hay session_id en el comando.
 
-Ejecuta esta query via MCP de Postgres (`mcp__postgres__query_data`):
+Toma el `user_id` (chat_id) del mensaje de Telegram que disparó este comando —
+**no lo hardcodees ni lo tomes de configuración**: cada usuario debe ver solo
+sus propias sesiones, para que esto escale cuando haya varios usuarios
+(family/guest en `agent_user_roles`).
+
+Ejecuta esta query via MCP de Postgres (`mcp__postgres__query_data`), sustituyendo
+`{user_id}` por ese valor:
 
 ```sql
 SELECT
@@ -80,7 +86,7 @@ SELECT
     array_agg(category ORDER BY fecha) AS categories,
     array_agg(content ORDER BY fecha)  AS contents
 FROM agent_memory
-WHERE user_id = <owner_chat_id>
+WHERE user_id = {user_id}
   AND session_id IS NOT NULL
 GROUP BY session_id
 ORDER BY MAX(fecha) DESC

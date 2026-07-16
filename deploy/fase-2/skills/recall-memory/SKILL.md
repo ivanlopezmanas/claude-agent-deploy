@@ -19,7 +19,7 @@ Consulta la tabla `agent_memory` en PostgreSQL via MCP (`mcp__postgres__query_da
 ### Memorias recientes (uso por defecto al inicio de sesión)
 
 ```sql
-SELECT category, keywords, text, fecha
+SELECT category, keywords, content, fecha
 FROM agent_memory
 ORDER BY fecha DESC
 LIMIT 10;
@@ -28,7 +28,7 @@ LIMIT 10;
 ### Por keyword (cuando el usuario menciona un tema concreto)
 
 ```sql
-SELECT category, keywords, text, fecha
+SELECT category, keywords, content, fecha
 FROM agent_memory
 WHERE keywords && ARRAY['tema']
 ORDER BY fecha DESC
@@ -38,9 +38,9 @@ LIMIT 10;
 ### Búsqueda fulltext (cuando hay una frase o concepto específico)
 
 ```sql
-SELECT category, keywords, text, fecha
+SELECT category, keywords, content, fecha
 FROM agent_memory
-WHERE to_tsvector('spanish', text) @@ plainto_tsquery('spanish', 'búsqueda')
+WHERE to_tsvector('spanish', content) @@ plainto_tsquery('spanish', 'búsqueda')
 ORDER BY fecha DESC
 LIMIT 10;
 ```
@@ -48,7 +48,7 @@ LIMIT 10;
 ### Por fecha
 
 ```sql
-SELECT category, keywords, text, fecha
+SELECT category, keywords, content, fecha
 FROM agent_memory
 WHERE DATE(fecha) = 'YYYY-MM-DD'
 ORDER BY fecha DESC;
