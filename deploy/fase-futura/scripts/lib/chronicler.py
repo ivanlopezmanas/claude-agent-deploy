@@ -96,7 +96,7 @@ def parse_memories(raw):
         return []
 
 
-def insert_memories(session_id, memories):
+def insert_memories(session_id, memories, user_id=None):
     import psycopg2
     inserted = 0
     errors = 0
@@ -127,9 +127,9 @@ def insert_memories(session_id, memories):
             try:
                 cur.execute(
                     "INSERT INTO agent_memory "
-                    "(session_id, category, keywords, content, importance) "
-                    "VALUES (%s::uuid, %s, %s, %s, %s)",
-                    (session_id, category, keywords, content, importance)
+                    "(session_id, user_id, category, keywords, content, importance) "
+                    "VALUES (%s::uuid, %s, %s, %s, %s, %s)",
+                    (session_id, user_id, category, keywords, content, importance)
                 )
                 conn.commit()
                 inserted += 1
@@ -234,7 +234,12 @@ def main():
             tg_send(bot_token, chat_id, "Sesión cerrada. Sin novedades que recordar.")
         sys.exit(0)
 
-    inserted, errors = insert_memories(session_id, memories)
+    try:
+        user_id = int(chat_id) if chat_id else None
+    except ValueError:
+        user_id = None
+
+    inserted, errors = insert_memories(session_id, memories, user_id)
     log(f"[INFO] inserted={inserted} errors={errors}")
 
     write_improvement_material(session_id, memories, inserted)
