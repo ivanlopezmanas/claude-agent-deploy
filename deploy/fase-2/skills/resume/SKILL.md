@@ -1,15 +1,60 @@
 ---
 name: resume
 description: >
-  Retoma una sesión anterior. Úsala cuando el usuario escriba /resume_{session_id} o pida
-  continuar donde lo dejó en una sesión previa. Si incluye session_id, va directo al
+  Retoma una sesión anterior. Úsala cuando el usuario escriba /resume_{session_id} o /resume o pida
+  continuar donde lo dejó en una sesión previa. Si incluye {session_id}, va directo al
   transcript. Si no, consulta la BD para mostrar sesiones recientes.
 version: 1.1.0
 ---
 
 # Skill /resume — Continuidad de sesiones
 
-Flujo en dos fases. Empieza siempre por FASE 2 si hay session_id. Solo si no lo hay, ejecuta FASE 1.
+Flujo en dos fases:
+- Si no tiene {session_id} Fase 1. busqueda de sesiones recientes. Si ya tiene {session_id} salta a la Fase 2.
+- Fase 2 - busqueda del archivo de la sesión, limpieza de la sesión con scripts/distill-transcript.py, por ultimo resumen de sesión. 
+---
+
+## FASE 1 — Presentar sesiones recientes
+
+Solo si no hay session_id en el comando.
+
+Toma el `user_id` (chat_id) del mensaje de Telegram que disparó este comando —
+**no lo hardcodees ni lo tomes de configuración**: cada usuario debe ver solo
+sus propias sesiones, para que esto escale cuando haya varios usuarios
+(family/guest en `agent_user_roles`).
+
+Ejecuta esta query via MCP de Postgres (`mcp__postgres__query_data`), sustituyendo
+`{user_id}` por ese valor:
+
+```sql
+SELECT
+    session_id::text,
+    MIN(fecha) AT TIME ZONE 'Europe/Madrid' AS inicio,
+    MAX(fecha) AT TIME ZONE 'Europe/Madrid' AS fin,
+    array_agg(category ORDER BY fecha) AS categories,
+    array_agg(content ORDER BY fecha)  AS contents
+FROM agent_memory
+WHERE user_id = {user_id}
+  AND session_id IS NOT NULL
+GROUP BY session_id
+ORDER BY MAX(fecha) DESC
+LIMIT 8;
+```
+
+Para cada sesión, determina:
+- **Fecha**: usa `fin` formateada como `DD/MM HH:MM`
+- **Resumen**: 2 - 3 frases de qué se trabajó (basado en `contents`)
+- **Tarea inacabada**: detecta si algún texto menciona trabajo en curso, "pendiente",
+  "falta", "implementar", "continuar", o hay entradas `project`/`infrastructure` con
+  trabajo técnico activo que no concluye explícitamente
+
+Envía la lista por Telegram (reply, format: markdownv2):
+- Sesiones numeradas del 1 al N
+- Fecha + resumen breve
+- Si hay tarea inacabada: `⚠️ *Tarea sin cerrar:* descripción en negrita`
+- Al final, pregunta cuál quiere retomar
+
+Espera la respuesta antes de continuar a FASE 2.
 
 ---
 
@@ -65,45 +110,3 @@ Una vez que el subagente devuelva el resumen, formatearlo y enviarlo por Telegra
 No leas el transcript en el contexto principal — eso lo hace el subagente.
 
 ---
-
-## FASE 1 — Presentar sesiones recientes
-
-Solo si no hay session_id en el comando.
-
-Toma el `user_id` (chat_id) del mensaje de Telegram que disparó este comando —
-**no lo hardcodees ni lo tomes de configuración**: cada usuario debe ver solo
-sus propias sesiones, para que esto escale cuando haya varios usuarios
-(family/guest en `agent_user_roles`).
-
-Ejecuta esta query via MCP de Postgres (`mcp__postgres__query_data`), sustituyendo
-`{user_id}` por ese valor:
-
-```sql
-SELECT
-    session_id::text,
-    MIN(fecha) AT TIME ZONE 'Europe/Madrid' AS inicio,
-    MAX(fecha) AT TIME ZONE 'Europe/Madrid' AS fin,
-    array_agg(category ORDER BY fecha) AS categories,
-    array_agg(content ORDER BY fecha)  AS contents
-FROM agent_memory
-WHERE user_id = {user_id}
-  AND session_id IS NOT NULL
-GROUP BY session_id
-ORDER BY MAX(fecha) DESC
-LIMIT 8;
-```
-
-Para cada sesión, determina:
-- **Fecha**: usa `fin` formateada como `DD/MM HH:MM`
-- **Resumen**: 1-2 frases de qué se trabajó (basado en `contents`)
-- **Tarea inacabada**: detecta si algún texto menciona trabajo en curso, "pendiente",
-  "falta", "implementar", "continuar", o hay entradas `project`/`infrastructure` con
-  trabajo técnico activo que no concluye explícitamente
-
-Envía la lista por Telegram (reply, format: markdownv2):
-- Sesiones numeradas del 1 al N
-- Fecha + resumen breve
-- Si hay tarea inacabada: `⚠️ *Tarea sin cerrar:* descripción en negrita`
-- Al final, pregunta cuál quiere retomar
-
-Espera la respuesta antes de continuar a FASE 2.
