@@ -155,6 +155,16 @@
           }
         ]
       }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/<agent>/workspace/scripts/hooks/sessionend-hook.py"
+          }
+        ]
+      }
     ]
   }
 }
