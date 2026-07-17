@@ -10,6 +10,7 @@ import os
 import sys
 import json
 import time
+import fnmatch
 import datetime
 import subprocess
 from pathlib import Path
@@ -22,6 +23,7 @@ def _tmp(name: str) -> Path:
 
 LOG_PATH            = Path("/home/<agent>/logs/<agent>-permissions.log")
 WORKSPACE_TABLE     = Path("/home/<agent>/workspace/scripts/lib/workspace.json")
+AGENT_PERMISSIONS_TABLE = Path("/home/<agent>/workspace/scripts/lib/agent-permissions.json")
 SETTINGS_BACKGROUND = Path("/home/<agent>/claude/.claude/settings-background.json")
 TELEGRAM_TURN_FLAG  = _tmp("<agent>-telegram-turn")
 REWAKE_COUNTER      = _tmp("<agent>-stop-rewake-counter")
@@ -74,6 +76,92 @@ def context() -> str:
 
 def is_main_context() -> bool:
     return context() == "main"
+
+# ---------------------------------------------------------------- Política de permisos por agente
+# Tabla externa (agent-permissions.json) leída por pretooluse-hook.py. Solo aplica
+# cuando el payload trae agent_type (dentro de un subagente); el hilo principal
+# sigue gobernado por permissions.allow/deny de settings.json, sin cambios.
+# Modelo allow-only, default-deny: sin match explícito → deny. Ver comentarios
+# del propio JSON para el detalle del formato.
+_agent_permissions_cache = None
+
+def _load_agent_permissions() -> dict:
+    """Lee agent-permissions.json una vez y cachea en memoria del proceso.
+
+    FAIL-SAFE, no fail-open: si el fichero falta o está corrupto, devuelve una
+    tabla vacía (defaults.allow=[], agents={}) — todo subagente queda sin permisos
+    hasta que se arregle el fichero, y el fallo se registra. Nunca debe abrirse
+    todo en silencio por un error de parseo.
+    """
+    global _agent_permissions_cache
+    if _agent_permissions_cache is not None:
+        return _agent_permissions_cache
+    empty = {"defaults": {"allow": []}, "agents": {}}
+    try:
+        data = json.loads(AGENT_PERMISSIONS_TABLE.read_text())
+        if not isinstance(data, dict) or "agents" not in data or "defaults" not in data:
+            raise ValueError("estructura inválida: faltan 'agents' o 'defaults'")
+        _agent_permissions_cache = data
+    except Exception as e:
+        log_permission("_agent_permissions", "error", f"fallo cargando {AGENT_PERMISSIONS_TABLE}: {e}")
+        _agent_permissions_cache = empty
+    return _agent_permissions_cache
+
+def _parse_rule(rule: str):
+    """Parsea 'Tool(patrón)' → (tool_name, patrón) o 'Tool' → (tool_name, None).
+
+    Mismo especificador que usa el sistema de permisos nativo de Claude Code.
+    Si el paréntesis no está bien formado (falta cierre, o hay algo después del
+    cierre), se trata la regla entera como nombre de tool literal — nunca se
+    interpreta a medias.
+    """
+    if not rule or "(" not in rule:
+        return rule, None
+    open_idx = rule.index("(")
+    if not rule.endswith(")"):
+        return rule, None
+    tool_name = rule[:open_idx]
+    pattern = rule[open_idx + 1:-1]
+    if not tool_name or pattern == "":
+        return rule, None
+    return tool_name, pattern
+
+_PATTERN_FIELD_BY_TOOL = {
+    "Bash": "command",
+    "Read": "file_path",
+    "Write": "file_path",
+    "Edit": "file_path",
+    "NotebookEdit": "notebook_path",
+}
+
+def _extract_match_value(tool_name: str, tool_input: dict) -> str:
+    field = _PATTERN_FIELD_BY_TOOL.get(tool_name)
+    if field:
+        return str(tool_input.get(field) or tool_input.get("path") or "")
+    return json.dumps(tool_input, sort_keys=True) if tool_input else ""
+
+def _rule_matches(tool_name: str, tool_input: dict, rule: str) -> bool:
+    rule_tool, pattern = _parse_rule(rule)
+    if rule_tool != tool_name:
+        return False
+    if pattern is None:
+        return True
+    value = _extract_match_value(tool_name, tool_input or {})
+    return fnmatch.fnmatchcase(value, pattern)
+
+def check_agent_policy(agent_type: str, tool_name: str, tool_input: dict) -> bool:
+    """True si `tool_name(tool_input)` está explícitamente permitido para `agent_type`.
+
+    Allow-only default-deny: sin entrada para el agente → política `defaults`
+    (allow=[] salvo que se configure lo contrario). Sin match en la lista →
+    False, sin excepciones ni fallback "ask".
+    """
+    table = _load_agent_permissions()
+    policy = table.get("agents", {}).get(agent_type) if agent_type else None
+    if policy is None:
+        policy = table.get("defaults", {"allow": []})
+    rules = policy.get("allow", [])
+    return any(_rule_matches(tool_name, tool_input, r) for r in rules)
 
 # ---------------------------------------------------------------- Sub-agentes aislados (§7.2)
 def call_isolated_agent(prompt: str, *, agent: str = None, model: str = None,

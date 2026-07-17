@@ -18,7 +18,7 @@ sys.path.insert(0, "/home/<agent>/workspace/scripts/lib")
 from common import (read_hook_input, allow, block, ask, review,
                         extract_path, lookup_tier, score_tool_call,
                         is_package_manager, is_dangerous_pipe, is_costly_agent,
-                        is_memory_path)
+                        is_memory_path, check_agent_policy)
 
 try:
     data = read_hook_input()
@@ -26,13 +26,15 @@ try:
     args = data.get("tool_input", {}) or {}
     if not isinstance(args, dict):
         args = {}
+    agent_type = data.get("agent_type") or ""
     path = extract_path(tool, args)
 
     # 3. Deny binario por tabla de rutas
     if path and lookup_tier(path) == "never":
         block(f"Ruta protegida (tier never): {path}", tool=tool)
 
-    # 4. Reglas inviolables (deterministas, prevalecen sobre el scoring)
+    # 4. Reglas inviolables (deterministas, prevalecen sobre cualquier otra capa —
+    #    aplican igual al hilo principal y a subagentes, sin excepción)
     if is_memory_path(path):
         block("La memoria vive en PostgreSQL, no en disco.", tool=tool)
     if is_dangerous_pipe(tool, args):
@@ -42,7 +44,17 @@ try:
     if is_costly_agent(tool, args):
         ask("Modelo costoso (>= Opus): requiere permiso del usuario propietario.", tool=tool)
 
-    # 5-6. Modelo de riesgo graduado
+    # 5. Subagentes: tabla de permisos por agent_type (agent-permissions.json),
+    #    allow-only / default-deny. No cae al modelo de riesgo genérico de abajo
+    #    — ese es solo para el hilo principal (§ regla de Iván: settings.json
+    #    sigue gobernando main, esta tabla es exclusiva de subagentes).
+    if agent_type:
+        if check_agent_policy(agent_type, tool, args):
+            allow(tool=tool)
+        else:
+            block(f"No permitido para agent_type={agent_type!r} (agent-permissions.json).", tool=tool)
+
+    # 6-7. Hilo principal: modelo de riesgo graduado (sin cambios)
     score, decision = score_tool_call(tool, args, path)
     if decision == "Allow":
         allow(tool=tool)

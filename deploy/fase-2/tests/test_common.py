@@ -178,6 +178,107 @@ class TestScoring:
         assert decision in ("RequireConfirmation", "Block")
 
 
+# ----------------------------------------------------------------- check_agent_policy()
+def _write_permissions_table(tmp_path, data):
+    p = tmp_path / "agent-permissions.json"
+    p.write_text(json.dumps(data))
+    return p
+
+
+class TestAgentPolicy:
+    @pytest.fixture(autouse=True)
+    def _reset_cache(self, monkeypatch):
+        # El loader cachea en memoria de proceso — sin esto un test contamina al siguiente.
+        monkeypatch.setattr(nc, "_agent_permissions_cache", None)
+        yield
+        monkeypatch.setattr(nc, "_agent_permissions_cache", None)
+
+    def test_bare_tool_allowed(self, tmp_path, monkeypatch):
+        table = _write_permissions_table(tmp_path, {
+            "defaults": {"allow": []},
+            "agents": {"seeker-scout": {"allow": ["WebSearch", "WebFetch"]}},
+        })
+        monkeypatch.setattr(nc, "AGENT_PERMISSIONS_TABLE", table)
+        assert nc.check_agent_policy("seeker-scout", "WebSearch", {"query": "x"}) is True
+
+    def test_tool_not_in_allow_list_denied(self, tmp_path, monkeypatch):
+        table = _write_permissions_table(tmp_path, {
+            "defaults": {"allow": []},
+            "agents": {"seeker-scout": {"allow": ["WebSearch", "WebFetch"]}},
+        })
+        monkeypatch.setattr(nc, "AGENT_PERMISSIONS_TABLE", table)
+        assert nc.check_agent_policy("seeker-scout", "Bash", {"command": "ls"}) is False
+
+    def test_scoped_bash_pattern_matches(self, tmp_path, monkeypatch):
+        table = _write_permissions_table(tmp_path, {
+            "defaults": {"allow": []},
+            "agents": {"session-continuity": {
+                "allow": ["Read", "Bash(python3 */distill-transcript.py *)"]
+            }},
+        })
+        monkeypatch.setattr(nc, "AGENT_PERMISSIONS_TABLE", table)
+        assert nc.check_agent_policy(
+            "session-continuity", "Bash",
+            {"command": "python3 /home/x/workspace/scripts/lib/distill-transcript.py /tmp/s.jsonl"}
+        ) is True
+
+    def test_scoped_bash_pattern_rejects_other_commands(self, tmp_path, monkeypatch):
+        table = _write_permissions_table(tmp_path, {
+            "defaults": {"allow": []},
+            "agents": {"session-continuity": {
+                "allow": ["Read", "Bash(python3 */distill-transcript.py *)"]
+            }},
+        })
+        monkeypatch.setattr(nc, "AGENT_PERMISSIONS_TABLE", table)
+        # Ni siquiera otro comando python3 legítimo debe colarse — solo el patrón exacto.
+        assert nc.check_agent_policy("session-continuity", "Bash", {"command": "rm -rf /"}) is False
+        assert nc.check_agent_policy(
+            "session-continuity", "Bash", {"command": "python3 -c 'import os; os.system(\"rm -rf /\")'"}
+        ) is False
+
+    def test_unlisted_agent_falls_back_to_defaults(self, tmp_path, monkeypatch):
+        table = _write_permissions_table(tmp_path, {
+            "defaults": {"allow": ["Read"]},
+            "agents": {"seeker-scout": {"allow": ["WebSearch"]}},
+        })
+        monkeypatch.setattr(nc, "AGENT_PERMISSIONS_TABLE", table)
+        assert nc.check_agent_policy("agente-nuevo-sin-alta", "Read", {"file_path": "/tmp/x"}) is True
+        assert nc.check_agent_policy("agente-nuevo-sin-alta", "Bash", {"command": "ls"}) is False
+
+    def test_empty_defaults_denies_everything_for_unlisted_agent(self, tmp_path, monkeypatch):
+        table = _write_permissions_table(tmp_path, {
+            "defaults": {"allow": []},
+            "agents": {"seeker-scout": {"allow": ["WebSearch"]}},
+        })
+        monkeypatch.setattr(nc, "AGENT_PERMISSIONS_TABLE", table)
+        assert nc.check_agent_policy("agente-nuevo-sin-alta", "Read", {"file_path": "/tmp/x"}) is False
+
+    def test_missing_file_denies_everything_and_logs(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(nc, "AGENT_PERMISSIONS_TABLE", tmp_path / "no-existe.json")
+        monkeypatch.setattr(nc, "LOG_PATH", tmp_path / "permissions.log")
+        assert nc.check_agent_policy("the-seeker", "Read", {"file_path": "/tmp/x"}) is False
+        assert "fallo cargando" in (tmp_path / "permissions.log").read_text()
+
+    def test_corrupt_json_denies_everything_and_logs(self, tmp_path, monkeypatch):
+        bad = tmp_path / "agent-permissions.json"
+        bad.write_text("{ esto no es json valido")
+        monkeypatch.setattr(nc, "AGENT_PERMISSIONS_TABLE", bad)
+        monkeypatch.setattr(nc, "LOG_PATH", tmp_path / "permissions.log")
+        assert nc.check_agent_policy("the-seeker", "Read", {"file_path": "/tmp/x"}) is False
+        assert "fallo cargando" in (tmp_path / "permissions.log").read_text()
+
+    def test_no_agent_type_is_not_this_function_job(self, tmp_path, monkeypatch):
+        # check_agent_policy() no decide si aplicarse o no según agent_type vacío —
+        # esa decisión la toma el hook (if agent_type: ...). Aquí solo confirmamos
+        # que con agent_type="" también cae a defaults, sin crashear.
+        table = _write_permissions_table(tmp_path, {
+            "defaults": {"allow": ["Read"]},
+            "agents": {},
+        })
+        monkeypatch.setattr(nc, "AGENT_PERMISSIONS_TABLE", table)
+        assert nc.check_agent_policy("", "Read", {"file_path": "/tmp/x"}) is True
+
+
 # ----------------------------------------------------------------- detectores
 class TestDetectors:
     def test_is_memory_path(self):

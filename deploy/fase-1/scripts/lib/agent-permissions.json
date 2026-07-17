@@ -1,0 +1,88 @@
+{
+  "_readme": [
+    "Tabla de permisos por subagente, leida por pretooluse-hook.py via common.py.",
+    "Modelo: allow-list unicamente, default-deny. Si una tool call no matchea ningun",
+    "patron de la lista allow del agente (o de defaults.allow si el agente no esta",
+    "listado), se bloquea. No hay deny list ni fallback ask.",
+    "Solo aplica cuando el payload de PreToolUse trae agent_type (dentro de un",
+    "subagente). El hilo principal sigue gobernado por permissions.allow/deny de",
+    "settings.json, como siempre -- esta tabla no lo toca.",
+    "Formato de patron: especificador Tool(patron), igual que el sistema de permisos",
+    "nativo de Claude Code. Un tool sin parentesis = todos los usos de ese tool.",
+    "Con parentesis: glob (* = comodin) contra el comando completo (Bash) o contra",
+    "el path (Read/Write/Edit).",
+    "Para anadir un agente nuevo: anade una entrada bajo agents. Si se te olvida,",
+    "ese agente no podra ejecutar nada via subagente -- falla ruidoso, no en silencio."
+  ],
+
+  "defaults": {
+    "allow": []
+  },
+
+  "agents": {
+    "the-seeker": {
+      "_comment": "Orquestador de investigacion (Opus). Lanza scouts, sintetiza, escribe informe. Sin Telegram, sin agent_memory, sin WebSearch/WebFetch directos.",
+      "allow": [
+        "Agent",
+        "Read",
+        "Write(*/workspace/docs/informes/*)"
+      ]
+    },
+    "seeker-scout": {
+      "_comment": "Scout de busqueda y lectura (Haiku). No escribe a disco.",
+      "allow": [
+        "WebSearch",
+        "WebFetch"
+      ]
+    },
+    "the-chronicler": {
+      "_comment": "Extrae memorias de sesion e inserta en agent_memory (Sonnet).",
+      "allow": [
+        "Read",
+        "mcp__postgres__query_data",
+        "mcp__postgres__insert_data"
+      ]
+    },
+    "session-continuity": {
+      "_comment": "Lector de continuidad de sesion para /resume (Sonnet). Bash restringido al script de distillation, nada mas.",
+      "allow": [
+        "Read",
+        "Bash(python3 */distill-transcript.py *)"
+      ]
+    },
+    "the-scribe": {
+      "_comment": "Gestion de email (Sonnet). No escribe a disco; no envia sin aprobacion explicita del usuario (lo controla el propio agente, no esta tabla).",
+      "allow": [
+        "mcp__gmail__list_emails",
+        "mcp__gmail__get_email",
+        "mcp__gmail__search_emails",
+        "mcp__gmail__send_email",
+        "mcp__gmail__create_draft",
+        "mcp__gmail__mark_as_read",
+        "mcp__postgres__query_data"
+      ]
+    },
+    "the-seneschal": {
+      "_comment": "Gestion de calendario y agenda (Sonnet). No escribe a disco.",
+      "allow": [
+        "mcp__caldav__list_calendars",
+        "mcp__caldav__get_events",
+        "mcp__caldav__create_event",
+        "mcp__caldav__update_event",
+        "mcp__caldav__delete_event",
+        "mcp__caldav__free_busy",
+        "mcp__postgres__query_data"
+      ]
+    },
+    "council-of-elders": {
+      "_comment": "Deliberacion por roles (Opus). Escribe al buzon indicado en el prompt de cada instancia -- el .md no fija el path exacto, se asume dentro de docs/. AJUSTAR si el buzon real vive en otra ruta.",
+      "allow": [
+        "Read",
+        "WebSearch",
+        "WebFetch",
+        "mcp__postgres__query_data",
+        "Write(*/workspace/docs/**)"
+      ]
+    }
+  }
+}
