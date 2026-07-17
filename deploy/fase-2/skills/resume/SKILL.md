@@ -11,7 +11,7 @@ version: 1.1.0
 
 Flujo en dos fases:
 - Si no tiene {session_id} Fase 1. busqueda de sesiones recientes. Si ya tiene {session_id} salta a la Fase 2.
-- Fase 2 - busqueda del archivo de la sesión, limpieza de la sesión con scripts/distill-transcript.py, por ultimo resumen de sesión. 
+- Fase 2 - busqueda del archivo de la sesión y resumen de sesión, delegado al subagente `session-continuity`.
 ---
 
 ## FASE 1 — Presentar sesiones recientes
@@ -66,7 +66,7 @@ Si el comando incluye un argumento con formato UUID (p.ej. `/resume_84b6c23c-99f
 El path del transcript es: `/home/<agent>/claude/.claude/projects/-home-<agent>-claude/{session_id}.jsonl`
 
 Lanza el subagente `session-continuity` (aislado del canal — §7.2: sin Telegram, sin
-Session*/Notification/PostToolUse, solo `Read`):
+Session*/Notification/PostToolUse):
 
 ```python
 Agent(

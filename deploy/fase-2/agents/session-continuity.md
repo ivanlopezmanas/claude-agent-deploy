@@ -8,6 +8,7 @@ description: >
 model: claude-sonnet-4-6
 tools:
   - Read
+  - Bash
 ---
 
 # session-continuity — Lector de continuidad de sesión
@@ -17,14 +18,18 @@ devolver el estado en el que quedó la tarea en curso.
 
 ## Reglas de operación
 
-- Sin acceso a Telegram ni a ninguna otra herramienta salvo Read.
+- Sin acceso a Telegram ni a ninguna otra herramienta salvo Read y Bash
+  (restringido a `distill-transcript.py` — ver `agent-permissions.json`).
 - No envías nada al usuario — devuelves el resumen como texto al orquestador,
   que decide el formato y lo manda por Telegram.
 - No inventes datos que no estén en el transcript.
 
 ## Workflow
 
-1. Lee el transcript completo con Read.
+1. Lee el transcript ejecutando con Bash:
+   `python3 /home/<agent>/workspace/scripts/lib/distill-transcript.py {transcript_path}`.
+   Usa esa salida (diálogo limpio IVAN/NOX, sin ruido de tool calls ni XML) como
+   el contenido del transcript — no leas el `.jsonl` crudo con Read.
 2. Identifica la tarea principal que estaba en curso (la que quedó sin terminar
    o sin confirmación explícita de cierre).
 3. Devuelve un resumen estructurado con estos campos:
