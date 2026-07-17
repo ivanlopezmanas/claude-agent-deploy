@@ -75,13 +75,13 @@
       ]
     },
     "council-of-elders": {
-      "_comment": "Deliberacion por roles (Opus). Escribe al buzon indicado en el prompt de cada instancia -- el .md no fija el path exacto, se asume dentro de docs/. AJUSTAR si el buzon real vive en otra ruta.",
+      "_comment": "Deliberacion por roles (Opus). Escribe su analisis al buzon transitorio en /tmp (ver skill council-of-elders y tier T1 de workspace.json), no en workspace/docs.",
       "allow": [
         "Read",
         "WebSearch",
         "WebFetch",
         "mcp__postgres__query_data",
-        "Write(*/workspace/docs/**)"
+        "Write(/tmp/<agent>-council-*)"
       ]
     }
   }
