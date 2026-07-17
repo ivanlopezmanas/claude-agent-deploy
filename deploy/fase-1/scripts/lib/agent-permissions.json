@@ -75,13 +75,20 @@
       ]
     },
     "council-of-elders": {
-      "_comment": "Deliberacion por roles (Opus). Escribe su analisis al buzon transitorio en /tmp (ver skill council-of-elders y tier T1 de workspace.json), no en workspace/docs.",
+      "_comment": "Orquestador de deliberacion (Opus). Decide roles en Fase 0, lanza council-warden en paralelo, sintetiza. Sin Telegram, sin agent_memory, sin WebSearch/WebFetch directos -- eso es trabajo de los wardens.",
+      "allow": [
+        "Agent",
+        "Read",
+        "Write(/tmp/<agent>-council-informe-*)"
+      ]
+    },
+    "council-warden": {
+      "_comment": "Evaluador individual de un rol/criterio (Sonnet), lanzado en paralelo por council-of-elders. No escribe a disco -- devuelve su analisis como respuesta final del agente.",
       "allow": [
         "Read",
         "WebSearch",
         "WebFetch",
-        "mcp__postgres__query_data",
-        "Write(/tmp/<agent>-council-*)"
+        "mcp__postgres__query_data"
       ]
     }
   }
