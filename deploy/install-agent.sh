@@ -709,6 +709,7 @@ step_19_to_26_workspace() {
   # scripts/lib (fase-0, fase-1, fase-futura)
   push_dir_contents "fase-0/scripts/lib"      "${AH}/workspace/scripts/lib"
   push_dir_contents "fase-1/scripts/lib"      "${AH}/workspace/scripts/lib"
+  push_dir_contents "fase-2/scripts/lib"      "${AH}/workspace/scripts/lib"
   push_dir_contents "fase-futura/scripts/lib" "${AH}/workspace/scripts/lib"
 
   # scripts/hooks (fase-1, fase-2)

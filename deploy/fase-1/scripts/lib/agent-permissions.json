@@ -28,7 +28,7 @@
         "Write(*/workspace/docs/informes/*)"
       ]
     },
-    "seeker-scout": {
+    "the-seeker-scout": {
       "_comment": "Scout de busqueda y lectura (Haiku). No escribe a disco.",
       "allow": [
         "WebSearch",
