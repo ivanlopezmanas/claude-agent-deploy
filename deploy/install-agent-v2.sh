@@ -139,6 +139,25 @@ ask_secret() {
   done
 }
 
+ask_secret_confirm() {
+  # ask_secret_confirm VARNAME "Pregunta"  — entrada oculta con doble confirmación (como un gestor de contraseñas)
+  local __var=$1; local __prompt=$2; local __input1 __input2
+  while :; do
+    read -rsp "${__prompt}: " __input1; echo ""
+    if [[ -z "${__input1}" ]]; then
+      log_warn "No puede estar vacío."
+      continue
+    fi
+    read -rsp "Confirma la contraseña: " __input2; echo ""
+    if [[ "${__input1}" != "${__input2}" ]]; then
+      log_warn "Las dos entradas no coinciden. Inténtalo de nuevo."
+      continue
+    fi
+    printf -v "${__var}" '%s' "${__input1}"
+    break
+  done
+}
+
 ask LXC_HOSTNAME    "Hostname del LXC"                  "ClaudeAgent${AGENT_TITLE}"
 ask RAM_MB          "RAM en MB"                         "5120"
 ask CORES           "Número de cores"                   "5"
@@ -149,7 +168,9 @@ ask BRIDGE          "Bridge de red"                     "vmbr0"
 ask IP_ADDRESS      "IP del LXC (formato 192.168.1.X/24)"  ""
 ask GATEWAY         "Gateway"                           "192.168.1.1"
 ask DNS             "DNS"                               "8.8.8.8"
-ask_secret PG_PASSWORD        "Password de PostgreSQL (oculto)"
+ask_secret_confirm ROOT_PASSWORD  "Password de root del LXC (oculto)"
+ask_secret_confirm AGENT_PASSWORD "Password del usuario del agente (oculto)"
+ask_secret_confirm PG_PASSWORD        "Password de PostgreSQL (oculto)"
 ask_secret TELEGRAM_BOT_TOKEN "Bot token de Telegram (oculto)"
 ask TELEGRAM_CHAT_ID  "Chat ID del propietario"         ""
 ask OWNER_NAME        "Nombre del propietario (para la BD)"  ""
@@ -170,6 +191,8 @@ cleanup_tmp() {
   rm -f "/tmp/init-db-${AGENT_NAME}-${VMID}.sql" 2>/dev/null || true
   rm -f "/tmp/secrets-${AGENT_NAME}-${VMID}.env" 2>/dev/null || true
   rm -f "/tmp/mcp-${AGENT_NAME}-${VMID}.json"   2>/dev/null || true
+  rm -f "/tmp/passwd-${AGENT_NAME}-${VMID}.txt" 2>/dev/null || true
+  rm -f "/tmp/claude-wrapper-${AGENT_NAME}-${VMID}.sh" 2>/dev/null || true
 }
 trap cleanup_tmp EXIT
 
@@ -187,6 +210,8 @@ cat <<EOF
   Red               : ip=${IP_ADDRESS} gw=${GATEWAY} dns=${DNS}
   Telegram chat_id  : ${TELEGRAM_CHAT_ID}
   Owner name        : ${OWNER_NAME}
+  Root password     : (oculto, ${#ROOT_PASSWORD} caracteres)
+  Agent password    : (oculto, ${#AGENT_PASSWORD} caracteres)
   PG password       : (oculto, ${#PG_PASSWORD} caracteres)
   Bot token         : (oculto, ${#TELEGRAM_BOT_TOKEN} caracteres)
   Templates (src)   : ${DEPLOY_SRC}
@@ -272,6 +297,23 @@ step_06_user_dirs() {
   lxc_exec "id ${AGENT_NAME} >/dev/null 2>&1 || useradd -m -s /usr/sbin/nologin -u 1000 ${AGENT_NAME}"
   lxc_exec "mkdir -p /home/${AGENT_NAME}/{claude,workspace/{docs/{improvements,incidentes,planes,tareas},tests,scripts/{hooks,lib}},apps/{bin,lib,share},data/{postgresql,cache},logs,tmp}"
   lxc_exec "chown -R ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}"
+}
+
+step_06b_passwords() {
+  # Contraseñas de root y del usuario del agente. Se pasan al LXC vía fichero
+  # (pct push) en lugar de por argv, para que no queden visibles en `ps` del host.
+  # El usuario del agente mantiene shell nologin (§1.8): esta contraseña es para
+  # `su`/uso local, no habilita SSH directo como ese usuario — el acceso SSH sigue
+  # siendo solo como root.
+  local tmp_passwd="/tmp/passwd-${AGENT_NAME}-${VMID}.txt"
+  umask 077
+  cat > "${tmp_passwd}" <<EOF
+root:${ROOT_PASSWORD}
+${AGENT_NAME}:${AGENT_PASSWORD}
+EOF
+  pct push "${VMID}" "${tmp_passwd}" /tmp/passwd.txt --perms 600
+  rm -f "${tmp_passwd}"
+  lxc_exec "chpasswd < /tmp/passwd.txt && rm -f /tmp/passwd.txt"
 }
 
 step_07_postgres_relocate() {
@@ -406,6 +448,24 @@ step_09_claude_code() {
   lxc_exec "/home/${AGENT_NAME}/claude/.local/bin/claude --version"
 }
 
+step_09b_claude_wrapper() {
+  # Claude Code vive en /home/${AGENT_NAME}/claude, no en el HOME de root. Este wrapper
+  # permite escribir "claude" directamente en una sesión SSH como root, delegando
+  # al usuario del agente con el HOME/PATH correctos.
+  local tmp_wrapper="/tmp/claude-wrapper-${AGENT_NAME}-${VMID}.sh"
+  cat > "${tmp_wrapper}" <<EOF
+#!/bin/bash
+exec su -s /bin/bash ${AGENT_NAME} -c '
+  export HOME=/home/${AGENT_NAME}/claude
+  export PATH=/home/${AGENT_NAME}/apps/bin:/home/${AGENT_NAME}/claude/.local/bin:/usr/local/bin:/usr/bin:/bin
+  cd /home/${AGENT_NAME}/claude
+  exec claude "\$@"
+' claude "\$@"
+EOF
+  pct push "${VMID}" "${tmp_wrapper}" /usr/local/bin/claude --perms 755
+  rm -f "${tmp_wrapper}"
+}
+
 step_10_oauth() {
   manual_box
   cat <<EOF
@@ -442,11 +502,13 @@ EOF
 }
 
 run_step STEP_06 "Crear usuario y estructura de directorios"   step_06_user_dirs
+run_step STEP_06B "Establecer contraseñas de root y del agente" step_06b_passwords
 run_step STEP_07 "Configurar PostgreSQL (PGDATA en el home)"   step_07_postgres_relocate
 run_step STEP_08 "Inicializar base de datos"                   step_08_init_db
 # STEP_16 (Node.js), STEP_17 (Bun) y STEP_18 (MCP) se ejecutan después del OAuth,
 # junto con la instalación del plugin Telegram y el access.json.
 run_step STEP_09 "Instalar Claude Code"                        step_09_claude_code
+run_step STEP_09B "Crear wrapper /usr/local/bin/claude (acceso root SSH)" step_09b_claude_wrapper
 run_step STEP_10 "OAuth interactivo de Claude Code (manual)"   step_10_oauth
 
 # =============================================================================
@@ -869,6 +931,7 @@ cat <<EOF
   - Agente   : ${AGENT_NAME}  (LXC vmid ${VMID}, hostname ${LXC_HOSTNAME})
   - IP       : ${IP_ADDRESS}
   - Servicio : claude-telegram.service
+  - SSH      : entra como root (password establecida); usa el comando 'claude' para invocar al agente
   ${BOLD}Acciones manuales pendientes / a confirmar${RESET}
   1. AppArmor: si está en modo COMPLAIN, tras ejercitar el agente sin denegaciones:
        pct exec ${VMID} -- aa-enforce /etc/apparmor.d/home.${AGENT_NAME}.claude
