@@ -5,6 +5,33 @@ lanzada con `claude --print`). NO hay usuario al otro lado: no esperes input int
 y no cierres con una respuesta conversacional. Tu único trabajo es vaciar la cola del
 inbox de forma atómica y terminar.
 
+`heartbeat.py` ya ha hecho el trabajo previo por ti, en Python puro, antes de invocarte:
+
+- Ha comprobado que había algo elegible en `agent_inbox` (si no, ni siquiera te habría
+  lanzado).
+- Ha reclamado esas filas de forma atómica (`UPDATE ... SET claimed_at = now() ... RETURNING`).
+  **Tú NO reclamas nada** — no ejecutes ningún `UPDATE`/`SELECT` genérico contra
+  `agent_inbox` para "coger trabajo". Las filas que tienes que procesar son EXACTAMENTE
+  las que aparecen en el bloque JSON al final de este prompt, identificadas por `id`.
+- Para las de `event_type = 'task'` con `script_path` en el payload, ya ha intentado
+  ejecutar ese script directamente. Todos esos scripts cumplen un contrato de salida
+  único: imprimen siempre `{"ok": bool, "notify": null|{"severity", "message", "context"}}`.
+  Si el resultado fue `ok=true` con `notify=null`, esa fila ya está cerrada y ni siquiera
+  llega hasta aquí. Si la ves en el JSON con una clave `_script_outcome`, es alguno de
+  estos casos — mira `_script_outcome.ok`:
+  - `ok=true` con `notify.message` ya escrito → el script hizo su trabajo y ya redactó el
+    texto; tu única tarea es enviarlo (no lo reescribas ni cambies el sentido).
+  - `ok=true` con `notify.context` pero `notify.message` en null → el script hizo su
+    trabajo pero necesita que TÚ redactes el texto a partir de `notify.context` (no
+    inventes datos que no estén ahí).
+  - `ok=false` → la tarea falló. Usa `notify` (si lo hay) para entender por qué y decide
+    con juicio: `deferred` si parece transitorio, avisar si es grave, `dropped` si no
+    tiene sentido reintentar. No repitas el script tú mismo.
+  - `ok=null` → el script incumplió su propio contrato (no imprimió el JSON esperado, o
+    ni siquiera llegó a arrancar). Trátalo como un fallo de infraestructura, no de la
+    tarea en sí — `_script_outcome.error` trae el detalle crudo (exit code, stdout,
+    stderr) para que decidas si avisar o solo dejar constancia.
+
 ## Reglas de esta sesión
 
 - **NO uses `mcp__plugin_telegram_telegram__reply` para conversación normal.** Esta sesión
@@ -13,37 +40,32 @@ inbox de forma atómica y terminar.
   envío directo a la Bot API descrito abajo (no el plugin).
 - No ejecutes acciones destructivas ni instalaciones. Si un item lo requiere, márcalo como
   `deferred` y deja constancia en su `decision`.
-- Si el inbox está vacío, no hagas nada y termina.
+- No hay reclamación que hacer ni inbox "vacío" que comprobar aquí: si estás corriendo,
+  es porque hay al menos una fila en el JSON de abajo.
 
 ## Pasos
 
-### 1. Reclama los items pendientes de forma atómica
+### 1. Identifica las filas a procesar
 
-Conecta a PostgreSQL vía el MCP de Postgres y ejecuta el UPDATE de reclamación. Nunca
-hagas `SELECT` seguido de `UPDATE`: reclama en una sola operación para evitar
-procesamiento doble si dos heartbeats coincidieran.
+Son las del bloque JSON al final de este prompt — cada una ya trae `id`, `source`,
+`event_type`, `payload`, `severity`, `agent`, `dedupe_key`, `scheduled_task_id`,
+`target_task_id`, `created_at`, `process_after`, y opcionalmente `_script_outcome`.
+No proceses nada que no esté en esa lista.
 
-```sql
-UPDATE inbox
-SET claimed_at = now()
-WHERE claimed_at IS NULL
-  AND processed_at IS NULL
-  AND process_after <= now()
-RETURNING *;
-```
+### 2. Procesa cada fila según `event_type` y `agent`
 
-Solo procesas las filas devueltas por este UPDATE.
-
-### 2. Procesa cada item reclamado según `event_type` y `agent`
-
-Para cada fila reclamada:
+Para cada fila:
 
 - `event_type = 'alert'` → si `severity = 'critical'`, notifica por Telegram (paso 4);
   el resto se evalúa y resume.
 - `event_type = 'reminder'` → si toca ahora, notifica; si no, vuelve a diferir.
 - `event_type = 'info'` → registra; normalmente se acumula para el briefing.
-- `event_type = 'task'` → ejecuta la acción descrita en `payload` dentro de los límites
-  de esta sesión (sin destrucción ni instalación).
+- `event_type = 'task'` con `_script_outcome` → sigue el contrato explicado arriba según
+  `_script_outcome.ok` (`true` con mensaje ya escrito, `true` con contexto para redactar,
+  `false`, o `null` por incumplimiento de contrato).
+- `event_type = 'task'` sin `script_path` en el payload → no hay script determinista para
+  esto; ejecuta la acción descrita en `payload` dentro de los límites de esta sesión (sin
+  destrucción ni instalación).
 - `event_type = 'scheduled_task'` → resuelve el `scheduled_task_id` / `target_task_id`
   y ejecuta el briefing o monitor correspondiente.
 - `event_type = 'follow_up'` → retoma el hilo indicado en `payload`.
@@ -51,10 +73,11 @@ Para cada fila reclamada:
   delega solo si está justificado y permitido; en caso contrario marca `delegated` o
   `deferred`.
 
-### 3. Cierra el estado de cada item
+### 3. Cierra el estado de cada fila, por `id`
 
-Para cada item procesado, actualiza `processed_at = now()` y un `decision` coherente con
-`chk_terminal_state`:
+Para cada fila de la lista, actualiza `processed_at = now()` y un `decision` coherente con
+`chk_terminal_state`, dirigiendo el UPDATE por `id` (`WHERE id = '<uuid>'`) — nunca un
+UPDATE genérico que pudiera tocar filas que no están en tu lista:
 
 - Enviado al usuario → `decision = 'sent'`.
 - Acumulado para el briefing → `decision = 'queued_briefing'` (deja `processed_at` NULL).

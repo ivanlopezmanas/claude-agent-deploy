@@ -1,5 +1,8 @@
 # /etc/systemd/system/heartbeat.service
-# Sesión efímera claude --print que reclama y procesa los items del inbox.
+# heartbeat.py decide primero, en Python puro, si hay algo elegible en
+# agent_inbox. Solo si lo hay invoca la sesión efímera claude --print que
+# reclama y procesa los items del inbox — evita pagar una llamada al modelo
+# en cada disparo del timer (cada 5 min) cuando el inbox está vacío.
 [Unit]
 Description=<Agent> heartbeat job
 After=network-online.target postgresql.service
@@ -14,6 +17,6 @@ Environment=<AGENT>_CONTEXT=heartbeat
 EnvironmentFile=/etc/<agent>/secrets.env
 TimeoutStartSec=4min
 # --strict-mcp-config es obligatorio: la sesión efímera NO debe heredar el plugin
-# de Telegram (evita la colisión de polling con la sesión principal).
-# Stdin redirect porque --input-file fue eliminado en Claude Code 2.x.
-ExecStart=/bin/bash -c '/home/<agent>/claude/.local/bin/claude --print --strict-mcp-config < /home/<agent>/workspace/scripts/lib/prompts/heartbeat.md'
+# de Telegram (evita la colisión de polling con la sesión principal). heartbeat.py
+# reproduce el mismo flag al invocar claude --print cuando hace falta.
+ExecStart=/usr/bin/python3 /home/<agent>/workspace/scripts/lib/heartbeat.py
