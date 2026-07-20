@@ -170,6 +170,16 @@ CREATE TABLE core_task (
   last_executed_at TIMESTAMPTZ              -- cuándo el heartbeat procesó la última ejecución
 );
 
+-- Filas iniciales. Solo se siembra aquí lo que ya cumple el contrato de salida
+-- de heartbeat.py ({"ok","notify"} por stdout) -- self-improve/autoreset/
+-- permission-audit siguen documentados en el diseño pero todavía no lo
+-- cumplen (ver tareas-pendientes.md), sembrarlos generaría fallos silenciosos
+-- cada vez que corrieran.
+INSERT INTO core_task (name, description, schedule_cron, script_path) VALUES
+  ('template-sync', 'Pull diario de ~/template/ desde claude-agent-deploy (fase 1: solo lectura)',
+   '0 5 * * *', 'workspace/scripts/lib/template_sync.py')
+ON CONFLICT (name) DO NOTHING;
+
 -- ---- §8 Proactividad: schedule_config --------------------------------------
 CREATE TABLE schedule_config (
   id                  SERIAL PRIMARY KEY,
