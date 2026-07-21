@@ -34,9 +34,10 @@ Script standalone; solo psycopg2 como dependencia externa (agent_memory).
 import glob
 import json
 import os
+import re
 import subprocess
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import psycopg2
 import psycopg2.extras
@@ -66,6 +67,15 @@ PERMISSIONS_LOG_TAIL_LINES = 50
 MEMORY_RECENT_DAYS = 7
 MEMORY_CHRONIC_DAYS = 30
 MEMORY_CHRONIC_MIN_OCCURRENCES = 3
+
+PERMISSION_AUDIT_WINDOW_DAYS = 7
+PERMISSION_AUDIT_MIN_EVENTS = 15
+PERMISSION_AUDIT_MIN_COUNT = 5
+PERMISSION_AUDIT_MIN_APPROVAL_RATE = 0.90
+PERMISSION_AUDIT_DENIED_RECUR = 3
+PERMISSION_AUDIT_DANGEROUS_PREFIXES = {
+    "rm", "dd", "mkfs", "chmod", "chown", "mv", "git push", ">", "dnf", "apt",
+}
 
 
 def log(msg: str) -> None:
@@ -157,6 +167,149 @@ def gather_permissions_log_tail() -> dict:
 
 
 # --------------------------------------------------------------------------
+# Paso 3 (self-improve.md) -- auditoría de permisos: agregación determinista
+# equivalente a lo que antes era un cron/script separado (permission-audit).
+# --------------------------------------------------------------------------
+def parse_permission_events(path: str, since_dt: datetime) -> list[dict]:
+    events = []
+    try:
+        with open(path) as f:
+            for raw in f:
+                line = raw.rstrip('\n')
+                parts = line.split('\t', 5)
+                if len(parts) < 5:
+                    continue
+                iso_ts, decision, tool_name, perm_rule, key_hash = parts[:5]
+                key_preview = parts[5] if len(parts) > 5 else ''
+                try:
+                    ts = datetime.fromisoformat(iso_ts)
+                    if ts.tzinfo is not None:
+                        ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+                except ValueError:
+                    continue
+                if ts < since_dt:
+                    continue
+                events.append({
+                    'ts': ts,
+                    'decision': decision,
+                    'tool_name': tool_name,
+                    'perm_rule': perm_rule,
+                    'key_hash': key_hash,
+                    'key_preview': key_preview,
+                })
+    except FileNotFoundError:
+        pass
+    return events
+
+
+def load_permission_allowlist(settings_path: str) -> set[str]:
+    try:
+        with open(settings_path) as f:
+            data = json.load(f)
+        return set(data.get('permissions', {}).get('allow', []))
+    except (FileNotFoundError, json.JSONDecodeError):
+        return set()
+
+
+def aggregate_permission_events(events: list[dict]) -> dict[str, dict]:
+    agg: dict[str, dict] = {}
+    for e in events:
+        rule = e['perm_rule']
+        if rule not in agg:
+            agg[rule] = {
+                'tool_name': e['tool_name'],
+                'total': 0,
+                'approved': 0,
+                'auto_approved': 0,
+                'denied': 0,
+                'blocked': 0,
+                'example': e['key_preview'],
+            }
+        a = agg[rule]
+        a['total'] += 1
+        d = e['decision']
+        if d == 'approved':
+            a['approved'] += 1
+        elif d == 'auto_approved':
+            a['auto_approved'] += 1
+        elif d == 'denied':
+            a['denied'] += 1
+        elif d == 'blocked':
+            a['blocked'] += 1
+    return agg
+
+
+def is_dangerous_permission_rule(perm_rule: str) -> bool:
+    if perm_rule == 'Bash(*)':
+        return True
+    m = re.match(r'Bash\((.+?)\s*\*\)', perm_rule)
+    if not m:
+        return False
+    words = m.group(1).split()
+    first_token = words[0]
+    two_word = ' '.join(words[:2]) if len(words) >= 2 else ''
+    return first_token in PERMISSION_AUDIT_DANGEROUS_PREFIXES or two_word in PERMISSION_AUDIT_DANGEROUS_PREFIXES
+
+
+def suggest_permission_allowlist(agg: dict[str, dict], current_allow: set[str]) -> list[dict]:
+    candidates = []
+    for rule, a in agg.items():
+        total_decided = a['approved'] + a['auto_approved'] + a['denied']
+        if total_decided == 0:
+            continue
+        approval_rate = (a['approved'] + a['auto_approved']) / total_decided
+        count = total_decided
+        if (count >= PERMISSION_AUDIT_MIN_COUNT
+                and approval_rate >= PERMISSION_AUDIT_MIN_APPROVAL_RATE
+                and a['denied'] == 0
+                and not is_dangerous_permission_rule(rule)
+                and rule not in current_allow):
+            candidates.append({
+                'rule': rule,
+                'count': count,
+                'approval_rate': approval_rate,
+                'example': a['example'],
+            })
+    candidates.sort(key=lambda x: x['count'], reverse=True)
+    return candidates
+
+
+def recurring_permission_denials(agg: dict[str, dict]) -> list[dict]:
+    result = [
+        {'rule': rule, 'denied': a['denied'], 'example': a['example']}
+        for rule, a in agg.items()
+        if a['denied'] >= PERMISSION_AUDIT_DENIED_RECUR
+    ]
+    result.sort(key=lambda x: x['denied'], reverse=True)
+    return result
+
+
+def gather_permission_audit() -> dict:
+    now = datetime.now()
+    since = now - timedelta(days=PERMISSION_AUDIT_WINDOW_DAYS)
+    events = parse_permission_events(PERMISSIONS_LOG, since)
+
+    if len(events) < PERMISSION_AUDIT_MIN_EVENTS:
+        return {
+            'event_count': len(events),
+            'window_days': PERMISSION_AUDIT_WINDOW_DAYS,
+            'note': f'menos de {PERMISSION_AUDIT_MIN_EVENTS} eventos en {PERMISSION_AUDIT_WINDOW_DAYS} días, sin agregación',
+        }
+
+    agg = aggregate_permission_events(events)
+    current_allow = load_permission_allowlist(SETTINGS_PATH)
+    candidates = suggest_permission_allowlist(agg, current_allow)
+    denials = recurring_permission_denials(agg)
+
+    return {
+        'event_count': len(events),
+        'window_days': PERMISSION_AUDIT_WINDOW_DAYS,
+        'allow_candidates': candidates,
+        'recurring_denials': denials,
+    }
+
+
+# --------------------------------------------------------------------------
 # Paso 5 (self-improve.md) -- memorias recientes + patrones recurrentes
 # --------------------------------------------------------------------------
 def gather_memory() -> dict:
@@ -206,6 +359,7 @@ def main() -> dict:
         'tests': gather_tests(),
         'settings_check': gather_settings_check(),
         'permissions_log_tail': gather_permissions_log_tail(),
+        'permission_audit': gather_permission_audit(),
         'memory': gather_memory(),
         'tareas_pendientes_path': TAREAS_PENDIENTES if os.path.exists(TAREAS_PENDIENTES) else None,
         'previous_report_path': latest_previous_report(),

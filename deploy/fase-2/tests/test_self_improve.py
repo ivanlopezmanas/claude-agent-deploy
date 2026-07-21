@@ -1,6 +1,7 @@
 # tests/test_self_improve.py
 import json
 import sys
+from datetime import datetime
 
 import pytest
 
@@ -143,6 +144,158 @@ class TestGatherPermissionsLogTail:
         assert "note" in result
 
 
+# ----------------------------------------------------------------- gather_permission_audit()
+def _perm_line(ts, decision, tool_name, perm_rule, key_hash="h", preview=""):
+    return f"{ts}\t{decision}\t{tool_name}\t{perm_rule}\t{key_hash}\t{preview}"
+
+
+class TestParsePermissionEvents:
+    def test_filters_by_window_and_parses_fields(self, tmp_path):
+        log_path = tmp_path / "perms.log"
+        log_path.write_text("\n".join([
+            _perm_line("2026-01-01T00:00:00", "approved", "Bash", "Bash(ls *)", preview="ls -la"),
+            _perm_line("2026-07-01T00:00:00", "denied", "Bash", "Bash(rm *)", preview="rm x"),
+        ]) + "\n")
+
+        events = si.parse_permission_events(str(log_path), datetime(2026, 6, 1))
+
+        assert len(events) == 1
+        assert events[0]["decision"] == "denied"
+        assert events[0]["perm_rule"] == "Bash(rm *)"
+
+    def test_skips_malformed_lines_without_raising(self, tmp_path):
+        log_path = tmp_path / "perms.log"
+        log_path.write_text("not\tenough\tfields\n" + _perm_line("2026-07-01T00:00:00", "approved", "Bash", "Bash(ls *)") + "\n")
+
+        events = si.parse_permission_events(str(log_path), datetime(2026, 1, 1))
+
+        assert len(events) == 1
+
+    def test_missing_log_returns_empty_list(self, tmp_path):
+        events = si.parse_permission_events(str(tmp_path / "no-existe.log"), datetime(2026, 1, 1))
+        assert events == []
+
+
+class TestIsDangerousPermissionRule:
+    def test_wildcard_bash_is_dangerous(self):
+        assert si.is_dangerous_permission_rule("Bash(*)") is True
+
+    def test_dangerous_prefix_is_dangerous(self):
+        assert si.is_dangerous_permission_rule("Bash(rm *)") is True
+
+    def test_safe_prefix_is_not_dangerous(self):
+        assert si.is_dangerous_permission_rule("Bash(ls *)") is False
+
+    def test_non_bash_rule_is_not_dangerous(self):
+        assert si.is_dangerous_permission_rule("Read(/home/**)") is False
+
+
+class TestSuggestPermissionAllowlist:
+    def test_suggests_frequent_approved_rule_not_in_allowlist(self):
+        agg = {
+            "Bash(ls *)": {
+                "tool_name": "Bash", "total": 6, "approved": 3, "auto_approved": 3,
+                "denied": 0, "blocked": 0, "example": "ls -la",
+            },
+        }
+
+        candidates = si.suggest_permission_allowlist(agg, current_allow=set())
+
+        assert len(candidates) == 1
+        assert candidates[0]["rule"] == "Bash(ls *)"
+
+    def test_excludes_rule_already_in_allowlist(self):
+        agg = {
+            "Bash(ls *)": {
+                "tool_name": "Bash", "total": 6, "approved": 6, "auto_approved": 0,
+                "denied": 0, "blocked": 0, "example": "ls -la",
+            },
+        }
+
+        candidates = si.suggest_permission_allowlist(agg, current_allow={"Bash(ls *)"})
+
+        assert candidates == []
+
+    def test_excludes_dangerous_rule_even_if_frequently_approved(self):
+        agg = {
+            "Bash(rm *)": {
+                "tool_name": "Bash", "total": 10, "approved": 10, "auto_approved": 0,
+                "denied": 0, "blocked": 0, "example": "rm -rf x",
+            },
+        }
+
+        candidates = si.suggest_permission_allowlist(agg, current_allow=set())
+
+        assert candidates == []
+
+    def test_excludes_rule_below_min_count_or_with_denials(self):
+        agg = {
+            "Bash(low *)": {
+                "tool_name": "Bash", "total": 2, "approved": 2, "auto_approved": 0,
+                "denied": 0, "blocked": 0, "example": "",
+            },
+            "Bash(mixed *)": {
+                "tool_name": "Bash", "total": 8, "approved": 7, "auto_approved": 0,
+                "denied": 1, "blocked": 0, "example": "",
+            },
+        }
+
+        candidates = si.suggest_permission_allowlist(agg, current_allow=set())
+
+        assert candidates == []
+
+
+class TestRecurringPermissionDenials:
+    def test_flags_rule_denied_at_or_above_threshold(self):
+        agg = {
+            "Bash(sudo *)": {
+                "tool_name": "Bash", "total": 3, "approved": 0, "auto_approved": 0,
+                "denied": 3, "blocked": 0, "example": "sudo x",
+            },
+            "Bash(ls *)": {
+                "tool_name": "Bash", "total": 2, "approved": 0, "auto_approved": 0,
+                "denied": 1, "blocked": 0, "example": "",
+            },
+        }
+
+        denials = si.recurring_permission_denials(agg)
+
+        assert [d["rule"] for d in denials] == ["Bash(sudo *)"]
+
+
+class TestGatherPermissionAudit:
+    def test_below_min_events_returns_note_without_aggregation(self, tmp_path, monkeypatch):
+        ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+        log_path = tmp_path / "perms.log"
+        log_path.write_text(_perm_line(ts, "approved", "Bash", "Bash(ls *)") + "\n")
+        monkeypatch.setattr(si, "PERMISSIONS_LOG", str(log_path))
+        monkeypatch.setattr(si, "PERMISSION_AUDIT_MIN_EVENTS", 15)
+
+        result = si.gather_permission_audit()
+
+        assert "note" in result
+        assert result["event_count"] == 1
+        assert "allow_candidates" not in result
+
+    def test_above_min_events_returns_candidates_and_denials(self, tmp_path, monkeypatch):
+        now = datetime.now()
+        ts = now.strftime("%Y-%m-%dT%H:%M:%S")
+        lines = [_perm_line(ts, "approved", "Bash", "Bash(ls *)") for _ in range(6)]
+        lines += [_perm_line(ts, "denied", "Bash", "Bash(sudo *)") for _ in range(3)]
+        log_path = tmp_path / "perms.log"
+        log_path.write_text("\n".join(lines) + "\n")
+        settings_path = tmp_path / "settings.json"
+        settings_path.write_text(json.dumps({"permissions": {"allow": []}}))
+        monkeypatch.setattr(si, "PERMISSIONS_LOG", str(log_path))
+        monkeypatch.setattr(si, "SETTINGS_PATH", str(settings_path))
+        monkeypatch.setattr(si, "PERMISSION_AUDIT_MIN_EVENTS", 5)
+
+        result = si.gather_permission_audit()
+
+        assert [c["rule"] for c in result["allow_candidates"]] == ["Bash(ls *)"]
+        assert [d["rule"] for d in result["recurring_denials"]] == ["Bash(sudo *)"]
+
+
 # ----------------------------------------------------------------- gather_memory()
 class _FakeCursor:
     def __init__(self, results):
@@ -247,6 +400,7 @@ class TestMain:
         monkeypatch.setattr(si, "gather_tests", lambda: {"summary": "5 passed", "returncode": 0})
         monkeypatch.setattr(si, "gather_settings_check", lambda: {"valid_json": True, "missing_hooks": []})
         monkeypatch.setattr(si, "gather_permissions_log_tail", lambda: {"tail": None})
+        monkeypatch.setattr(si, "gather_permission_audit", lambda: {"event_count": 0, "note": "sin eventos"})
         monkeypatch.setattr(si, "gather_memory", lambda: {"recent_7d": [], "chronic_patterns_30d": []})
         monkeypatch.setattr(si, "latest_previous_report", lambda: None)
 
@@ -269,7 +423,7 @@ class TestMain:
 
         assert set(context.keys()) == {
             "territory", "tests", "settings_check", "permissions_log_tail",
-            "memory", "tareas_pendientes_path", "previous_report_path",
+            "permission_audit", "memory", "tareas_pendientes_path", "previous_report_path",
         }
 
     def test_result_matches_heartbeat_contract_shape(self, monkeypatch, tmp_path):

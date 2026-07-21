@@ -34,7 +34,8 @@ Si el prompt incluye un bloque `## Evidencia pre-recopilada` con un JSON (lo dej
 - `territory` → Paso 1 (mapa de ficheros).
 - `tests` → Paso 2 (resultado de la suite).
 - `settings_check` → Pasos 2/3 (`valid_json`, `missing_hooks`).
-- `permissions_log_tail` → Paso 3 (últimas líneas del log de permisos).
+- `permissions_log_tail` → Paso 3 (últimas líneas crudas del log de permisos, para citar ejemplos).
+- `permission_audit` → Paso 3 (agregación ya calculada sobre 7 días: `allow_candidates` y `recurring_denials`; sustituye lo que antes hacía un script/cron aparte de auditoría de permisos).
 - `memory.recent_7d` / `memory.chronic_patterns_30d` → Paso 5.
 - `tareas_pendientes_path` / `previous_report_path` → rutas para el Paso 4 (ábrelas tú con `Read`, no vienen embebidas).
 
@@ -87,7 +88,7 @@ Lee `/home/<agent>/claude/.claude/settings.json` (si no lo tienes ya de otro pas
 
 1. **Reglas vs permisos**: ¿la lista `allow`/`deny` refleja las reglas de autonomía de CLAUDE.md? Ejemplo: si CLAUDE.md dice "nunca escribas en X sin confirmación", ¿está X ausente de `allow`?
 2. **Hooks vs disco**: para cada hook declarado en settings.json, verifica que el fichero existe y es ejecutable. Si ya tienes `settings_check.missing_hooks` de la evidencia pre-recopilada, úsalo directamente.
-3. **Permisos que faltan**: revisa el tail del log de permisos (`permissions_log_tail` si ya lo tienes, si no `tail -100 /home/<agent>/logs/<agent>-permissions.log`) -- aprobaciones manuales repetidas para el mismo patrón señalan un `allow` que falta.
+3. **Permisos que faltan**: usa `permission_audit` si ya lo tienes -- trae `allow_candidates` (reglas con ≥5 usos y ≥90% de aprobación en los últimos 7 días, sin denegaciones, ya filtradas de patrones peligrosos como `rm`/`git push`) y `recurring_denials` (reglas denegadas 3+ veces, candidatas a revisar o documentar por qué se bloquean a propósito). Si trae `note` en vez de esos campos, es que hubo pocos eventos en la ventana (`event_count` por debajo del mínimo) -- no hay agregación fiable, usa `permissions_log_tail` como referencia cualitativa. Sin evidencia pre-recopilada: `tail -100 /home/<agent>/logs/<agent>-permissions.log` y estima a ojo.
 
 ---
 
