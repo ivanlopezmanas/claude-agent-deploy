@@ -2,14 +2,21 @@
 #
 # install-agent.sh — Provisioning completo de un agente Claude Code en un LXC de Proxmox.
 #
-# Materializa el checklist §1.8 de seccion-1-infraestructura.md (pasos 1-48), sustituyendo
-# los placeholders <agent>/<AGENT>/<Agent> de todos los templates del directorio de deploy.
+# Flujo secuencial (STEP_01 a STEP_28):
+#   STEP_01-05: LXC base (create, start, SSH, apt, deps).
+#   STEP_06-08: Usuario, PostgreSQL, init-db.
+#   STEP_09-10: Claude Code + OAuth.
+#   STEP_11-15: Secrets, canal Telegram, trust, workspace.
+#   STEP_16-20: Node.js, Bun, MCP, plugin Telegram, access.json.
+#   STEP_21-22: systemd, sudoers.  STEP_23: AppArmor (comentado).
+#   STEP_24-25: enable/start + verificar servicio.
+#   STEP_26: Verificación Telegram (manual).
+#   STEP_27: Verificación final (pytest, postgres, heartbeat).
+#   STEP_28: Onboarding (último) — inyecta bloque en CLAUDE.md.
 #
 # Ejecutar EN EL HOST Proxmox (no dentro del LXC). Requiere: pct, pveam, rsync.
 #
-# Idempotente: guarda el progreso en /tmp/install-<agent>-<vmid>.checkpoint y salta los
-# pasos ya completados al re-ejecutar. En caso de fallo, para con un mensaje claro; no hace
-# rollback automático.
+# En caso de fallo, para con un mensaje claro; no hace rollback automático.
 
 set -euo pipefail
 
@@ -31,28 +38,16 @@ log_ok()   { echo "${GREEN}[OK]${RESET}   $*"; }
 log_warn() { echo "${YELLOW}[WARN]${RESET} $*"; }
 log_fail() { echo "${RED}[FAIL]${RESET} $*" >&2; }
 
-# El fichero de checkpoint se fija una vez recogidos AGENT_NAME y VMID (sección 1).
-CHECKPOINT_FILE=""
-
-checkpoint_done() { echo "$1=done" >> "${CHECKPOINT_FILE}"; }
-is_done()         { grep -q "^$1=done" "${CHECKPOINT_FILE}" 2>/dev/null; }
-
 # run_step ID DESC COMANDO [ARGS...]
-# Ejecuta el comando solo si el paso no está marcado como hecho. Para pasos complejos,
-# define una función step_XX_*() y pásala como comando.
+# Ejecuta el comando. Para pasos complejos, define una función step_XX_*() y pásala como comando.
 run_step() {
   local id=$1; local desc=$2; shift 2
-  if is_done "$id"; then
-    echo "${YELLOW}[SKIP]${RESET} $id — $desc"
-    return 0
-  fi
   echo ""
   echo "${BOLD}==> [$id] $desc${RESET}"
   if "$@"; then
-    checkpoint_done "$id"
     log_ok "$id"
   else
-    log_fail "$id falló. Corrígelo y re-ejecuta el script (los pasos completados se saltan)."
+    log_fail "$id falló. Corrígelo y re-ejecuta el script."
     exit 1
   fi
 }
@@ -191,11 +186,7 @@ if [[ ! -d "${DEPLOY_SRC}" ]]; then
   exit 1
 fi
 
-# Checkpoint y árbol de deploy en /var/lib/install-agent — sobreviven reinicios del host.
-# Los ficheros con secretos (SQL, env, json) sí van a /tmp (más seguros allí).
-mkdir -p /var/lib/install-agent
-CHECKPOINT_FILE="/var/lib/install-agent/${AGENT_NAME}-${VMID}.checkpoint"
-DEPLOY_TMP="/var/lib/install-agent/deploy-${AGENT_NAME}-${VMID}"
+DEPLOY_TMP="/tmp/deploy-${AGENT_NAME}-${VMID}"
 
 # Borrar ficheros temporales con secretos al salir (éxito o error)
 cleanup_tmp() {
@@ -229,15 +220,7 @@ cat <<EOF
   GitHub username   : ${GITHUB_USERNAME}
   Templates (src)   : ${DEPLOY_SRC}
   Template LXC      : ${PROXMOX_TEMPLATE}
-  Checkpoint        : ${CHECKPOINT_FILE}
 EOF
-
-if [[ -f "${CHECKPOINT_FILE}" ]]; then
-  echo ""
-  log_warn "Ya existe un checkpoint para este agente. Pasos ya completados:"
-  sed 's/=done//' "${CHECKPOINT_FILE}" | sed 's/^/    /'
-  log_warn "Esos pasos se saltarán. Borra ${CHECKPOINT_FILE} para empezar de cero."
-fi
 
 echo ""
 read -rp "¿Continuar? [s/N] " CONFIRM
@@ -246,11 +229,8 @@ if [[ ! "${CONFIRM}" =~ ^[sSyY]$ ]]; then
   exit 0
 fi
 
-# Crear el fichero de checkpoint si no existe (touch idempotente)
-touch "${CHECKPOINT_FILE}"
-
 # =============================================================================
-# SECCIÓN 2 — Fase A: LXC base (pasos 1-5)
+# SECCIÓN 2 — LXC base (STEP_01-05)
 # =============================================================================
 
 step_01_create_lxc() {
@@ -314,7 +294,7 @@ run_step STEP_04 "apt update + upgrade"                       step_04_apt_update
 run_step STEP_05 "Instalar dependencias del sistema"         step_05_deps
 
 # =============================================================================
-# SECCIÓN 3 — Fase B: Usuario, estructura y base de datos (pasos 6-13)
+# SECCIÓN 3 — Usuario, base de datos y setup del agente (STEP_06-15)
 # =============================================================================
 
 step_06_user_dirs() {
@@ -419,7 +399,7 @@ step_08_init_db() {
   lxc_exec "rm -f /tmp/init-db.sql"
 }
 
-step_09_node() {
+step_16_node() {
   lxc_exec "
     set -e
     NODE_VERSION='v22.11.0'
@@ -434,7 +414,7 @@ step_09_node() {
   "
 }
 
-step_10_bun() {
+step_17_bun() {
   lxc_exec "
     set -e
     export BUN_INSTALL=/home/${AGENT_NAME}/apps
@@ -447,7 +427,7 @@ step_10_bun() {
   "
 }
 
-step_11_mcp_postgres() {
+step_18_mcp_postgres() {
   lxc_exec "
     set -e
     export PATH=/home/${AGENT_NAME}/apps/bin:\$PATH
@@ -457,13 +437,22 @@ step_11_mcp_postgres() {
   "
 }
 
-step_12_claude_code() {
+step_20_telegram_access() {
+  # Escribe el access.json definitivo con allowlist (sin pairing).
+  lxc_exec "cat > /home/${AGENT_NAME}/claude/.claude/channels/telegram/access.json <<'EOF'
+{\"dmPolicy\":\"allowlist\",\"allowFrom\":[\"${TELEGRAM_CHAT_ID}\"],\"groups\":{},\"pending\":{}}
+EOF"
+  lxc_exec "chown ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}/claude/.claude/channels/telegram/access.json"
+  log_ok "access.json escrito con dmPolicy:allowlist y chat_id ${TELEGRAM_CHAT_ID}."
+}
+
+step_09_claude_code() {
   lxc_exec "su -s /bin/bash ${AGENT_NAME} -c 'export HOME=/home/${AGENT_NAME}/claude && curl -fsSL https://claude.ai/install.sh | bash'"
   lxc_exec "chown -R ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}/claude"
   lxc_exec "/home/${AGENT_NAME}/claude/.local/bin/claude --version"
 }
 
-step_12b_claude_wrapper() {
+step_09b_claude_wrapper() {
   # Claude Code vive en /home/${AGENT_NAME}/claude, no en el HOME de root. Este wrapper
   # permite escribir "claude" directamente en una sesión SSH como root, delegando
   # al usuario del agente con el HOME/PATH correctos.
@@ -481,7 +470,7 @@ EOF
   rm -f "${tmp_wrapper}"
 }
 
-step_13_oauth() {
+step_10_oauth() {
   manual_box
   cat <<EOF
 ${BOLD}OAuth interactivo de Claude Code${RESET}
@@ -520,25 +509,24 @@ run_step STEP_06 "Crear usuario y estructura de directorios"   step_06_user_dirs
 run_step STEP_06B "Establecer contraseñas de root y del agente" step_06b_passwords
 run_step STEP_07 "Configurar PostgreSQL (PGDATA en el home)"   step_07_postgres_relocate
 run_step STEP_08 "Inicializar base de datos"                   step_08_init_db
-run_step STEP_09 "Instalar Node.js"                            step_09_node
-run_step STEP_10 "Instalar Bun"                                step_10_bun
-run_step STEP_11 "Instalar MCP PostgreSQL"                     step_11_mcp_postgres
-run_step STEP_12 "Instalar Claude Code"                        step_12_claude_code
-run_step STEP_12B "Crear wrapper /usr/local/bin/claude (acceso root SSH)" step_12b_claude_wrapper
-run_step STEP_13 "OAuth interactivo de Claude Code (manual)"   step_13_oauth
+# STEP_16 (Node.js), STEP_17 (Bun) y STEP_18 (MCP) se ejecutan después del OAuth,
+# junto con la instalación del plugin Telegram y el access.json.
+run_step STEP_09 "Instalar Claude Code"                        step_09_claude_code
+run_step STEP_09B "Crear wrapper /usr/local/bin/claude (acceso root SSH)" step_09b_claude_wrapper
+run_step STEP_10 "OAuth interactivo de Claude Code (manual)"   step_10_oauth
 
 # =============================================================================
 # SECCIÓN 4 — Fase C: Secretos (pasos 14-15)
 # =============================================================================
 
-step_14_secrets_file() {
+step_11_secrets_file() {
   lxc_exec "mkdir -p /etc/${AGENT_NAME}"
   lxc_exec "touch /etc/${AGENT_NAME}/secrets.env"
   lxc_exec "chmod 640 /etc/${AGENT_NAME}/secrets.env"
   lxc_exec "chown root:${AGENT_NAME} /etc/${AGENT_NAME}/secrets.env"
 }
 
-step_15_secrets_fill() {
+step_12_secrets_fill() {
   # Escribir secrets.env SIN que los secretos pasen por stdout/argv visibles.
   # Generamos el fichero localmente con heredoc y lo empujamos con pct push.
   local tmp_secrets="/tmp/secrets-${AGENT_NAME}-${VMID}.env"
@@ -557,14 +545,14 @@ EOF
   lxc_exec "grep -q '^TELEGRAM_BOT_TOKEN=' /etc/${AGENT_NAME}/secrets.env && grep -q '^POSTGRES_CONNECTION_STRING=' /etc/${AGENT_NAME}/secrets.env && grep -q '^GITHUB_TOKEN=' /etc/${AGENT_NAME}/secrets.env"
 }
 
-run_step STEP_14 "Crear /etc/${AGENT_NAME}/secrets.env"        step_14_secrets_file
-run_step STEP_15 "Rellenar secrets.env (secretos)"            step_15_secrets_fill
+run_step STEP_11 "Crear /etc/${AGENT_NAME}/secrets.env"        step_11_secrets_file
+run_step STEP_12 "Rellenar secrets.env (secretos)"            step_12_secrets_fill
 
 # =============================================================================
 # SECCIÓN 5 — Fase D: Plugin Telegram (pasos 16-18)
 # =============================================================================
 
-step_16_telegram_plugin() {
+step_19_telegram_plugin() {
   lxc_exec "su -s /bin/bash ${AGENT_NAME} -c '
     export HOME=/home/${AGENT_NAME}/claude
     export PATH=/home/${AGENT_NAME}/apps/bin:/home/${AGENT_NAME}/claude/.local/bin:/usr/local/bin:/usr/bin:/bin
@@ -573,19 +561,17 @@ step_16_telegram_plugin() {
   lxc_exec "su -s /bin/bash ${AGENT_NAME} -c 'HOME=/home/${AGENT_NAME}/claude PATH=/home/${AGENT_NAME}/apps/bin:/home/${AGENT_NAME}/claude/.local/bin:/usr/local/bin:/usr/bin:/bin claude plugin list'"
 }
 
-step_17_channel_dir() {
+step_13_channel_dir() {
+  # El directorio solo se crea aquí. El access.json se escribe en step_20_telegram_access
+  # (STEP_20), después de instalar el plugin Telegram.
   lxc_exec "mkdir -p /home/${AGENT_NAME}/claude/.claude/channels/telegram"
-  # Pre-populate access.json con el chat_id del owner para saltarse el pairing manual.
-  lxc_exec "cat > /home/${AGENT_NAME}/claude/.claude/channels/telegram/access.json <<'EOF'
-{\"dmPolicy\":\"allowlist\",\"allowFrom\":[\"${TELEGRAM_CHAT_ID}\"],\"groups\":{},\"pending\":{}}
-EOF"
   lxc_exec "chown -R ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}/claude/.claude/channels"
   lxc_exec "grep -q 'TELEGRAM_BOT_TOKEN' /etc/${AGENT_NAME}/secrets.env"
 }
 
-step_18_trust() {
-  # Configura .claude.json: acepta trust y pre-registra el MCP de postgres.
-  # El servidor va aquí (no en .mcp.json) para evitar el diálogo interactivo
+step_14_trust() {
+  # Configura .claude.json: acepta trust y pre-registra los MCPs.
+  # Los servidores van aquí (no en .mcp.json) para evitar el diálogo interactivo
   # de aprobación que bloquea el servicio al arrancar sin TTY.
   lxc_exec "python3 - <<'PYEOF'
 import json
@@ -601,6 +587,10 @@ proj['mcpServers'] = {
     'postgres': {
         'command': '/home/${AGENT_NAME}/apps/bin/mcp-server-postgres',
         'args': ['postgresql://${AGENT_NAME}:${PG_PASSWORD}@localhost:5432/agents']
+    },
+    'context7': {
+        'command': 'npx',
+        'args': ['-y', '@upstash/context7-mcp@latest']
     }
 }
 with open(path, 'w') as f:
@@ -610,9 +600,9 @@ PYEOF"
   lxc_exec "chown ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}/claude/.claude.json"
 }
 
-run_step STEP_16 "Instalar plugin Telegram"                    step_16_telegram_plugin
-run_step STEP_17 "Preparar directorio del canal Telegram"      step_17_channel_dir
-run_step STEP_18 "Aceptar trust de /home/${AGENT_NAME}/claude" step_18_trust
+run_step STEP_13 "Preparar directorio del canal Telegram"      step_13_channel_dir
+run_step STEP_14 "Aceptar trust de /home/${AGENT_NAME}/claude" step_14_trust
+# STEP_19 (plugin Telegram) se instala después de bun (STEP_17) — el plugin requiere bun.
 
 # =============================================================================
 # SECCIÓN 6 — Fase E: Workspace y harness (pasos 19-26)
@@ -624,53 +614,23 @@ prepare_deploy_tmp() {
   mkdir -p "${DEPLOY_TMP}"
   rsync -a "${DEPLOY_SRC}/" "${DEPLOY_TMP}/"
 
+  # IP sin máscara CIDR, para mostrarla limpia en el CLAUDE.md.
+  local IP_ADDRESS_BARE="${IP_ADDRESS%%/*}"
+
   # Sustitución global de placeholders en el CONTENIDO de todos los ficheros.
   # Orden importante: <AGENT> y <Agent> antes que <agent> (todos son distintos
   # literalmente, pero mantenemos el orden por claridad).
   find "${DEPLOY_TMP}/" -type f -print0 | xargs -0 sed -i \
     -e "s|<AGENT>|${AGENT_UPPER}|g" \
     -e "s|<Agent>|${AGENT_TITLE}|g" \
-    -e "s|<agent>|${AGENT_NAME}|g"
+    -e "s|<agent>|${AGENT_NAME}|g" \
+    -e "s|<vmid>|${VMID}|g" \
+    -e "s|<ip_address>|${IP_ADDRESS_BARE}|g" \
+    -e "s|<hostname>|${LXC_HOSTNAME}|g"
 
-  # Renombrar ficheros que tengan AGENT en su nombre (de hojas a raíz: -depth).
-  # Los templates usan AGENT (sin corchetes) para sobrevivir la subida a GitHub,
-  # que reemplaza < y > con _ haciendo que el rename no funcione.
-  find "${DEPLOY_TMP}/" -depth -name "*AGENT*" | while read -r f; do
-    mv "$f" "$(echo "$f" | sed "s|AGENT|${AGENT_NAME}|g")"
-  done
-
-  # Verificar que no quedan ficheros sin renombrar.
-  local unresolved
-  unresolved=$(find "${DEPLOY_TMP}/" -name "*AGENT*" 2>/dev/null)
-  if [[ -n "${unresolved}" ]]; then
-    log_fail "prepare_deploy_tmp: ficheros sin renombrar con AGENT en el nombre:"
-    echo "${unresolved}" >&2
-    return 1
-  fi
-
-  # Inyectar la sección de onboarding al final del CLAUDE.md (solo en la copia temporal).
-  local claude_md="${DEPLOY_TMP}/fase-0/CLAUDE.md"
-  if [[ -f "${claude_md}" ]]; then
-    cat >> "${claude_md}" <<'ONBOARDING'
-
----
-
-## Primer arranque — LEER ESTO ANTES DE RESPONDER
-
-Este es el primer arranque del agente. El CLAUDE.md aún no contiene datos del usuario propietario.
-
-**Antes de responder al primer mensaje**, el agente debe:
-1. Avisar al usuario que es la primera sesión y que va a hacer unas preguntas de configuración
-2. Preguntar de forma conversacional (no como formulario): nombre completo, fecha de nacimiento, familia cercana (pareja, hijos con nombres y fechas), nivel técnico, principales usos del agente
-3. Preguntar el tono deseado: formal/informal, idioma preferido, estilo de respuesta
-4. Una vez recogida la información, actualizar este CLAUDE.md con los datos reales (Edit tool)
-5. Actualizar también `~/workspace/state/instance-identity.json` (ya existe, creado por el instalador con agent/vmid/ip/hostname/owner_name) rellenando las claves que hasta ahora estaban vacías: `profession`, `family`, `tech_level`, `use_cases`, `tone_style`, `language_preference` — con el mismo texto que se acaba de escribir en el CLAUDE.md. Este fichero es local y nunca se propaga; es lo que permite reconstruir la forma agnóstica de un fichero si algún día hace falta.
-6. Borrar esta sección "Primer arranque" del CLAUDE.md una vez completado el onboarding
-7. Confirmar al usuario que la configuración está guardada
-
-El agente NO debe responder preguntas normales hasta completar este flujo de onboarding.
-ONBOARDING
-  fi
+  # El bloque de onboarding no se inyecta aquí.
+  # Se añade al CLAUDE.md del LXC en step_20_telegram_access, después del OAuth y de
+  # instalar bun/MCP, para que el primer mensaje de Telegram dispare el onboarding.
 }
 
 # Empuja un fichero del DEPLOY_TMP al LXC, creando el directorio destino primero.
@@ -705,7 +665,7 @@ push_dir_contents() {
   done < <(find "${srcdir}" -type f -print0)
 }
 
-step_19_to_26_workspace() {
+step_15_workspace() {
   prepare_deploy_tmp
 
   local AH="/home/${AGENT_NAME}"
@@ -734,7 +694,7 @@ step_19_to_26_workspace() {
   push_file "fase-1/settings.json"            "${AH}/claude/.claude/settings.json"
   push_file "fase-1/settings-background.json" "${AH}/claude/.claude/settings-background.json"
 
-  # El servidor MCP de postgres va en .claude.json (step_18_trust), no en .mcp.json.
+  # El servidor MCP de postgres va en .claude.json (step_14_trust), no en .mcp.json.
   # .mcp.json dispara un diálogo interactivo de aprobación que bloquea el servicio.
 
   # Agentes y skills (fase-2) — placeholders ya sustituidos por prepare_deploy_tmp
@@ -754,9 +714,9 @@ step_19_to_26_workspace() {
   lxc_exec "chown -R ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}"
 }
 
-run_step STEP_19_TO_26 "Copiar workspace y harness al LXC"     step_19_to_26_workspace
+run_step STEP_15 "Copiar workspace y harness al LXC"     step_15_workspace
 
-step_19b_instance_identity() {
+step_15b_instance_identity() {
   # instance-identity.json: mapa placeholder->valor real de ESTA instancia.
   # Local, nunca sale de la máquina (fase 2, propagación template<->instancia:
   # es lo que hace determinista y auditable la traducción inversa agnóstico<-real).
@@ -800,22 +760,22 @@ PYEOF
   rm -f "${tmp_identity}"
 }
 
-run_step STEP_19B "Escribir instance-identity.json (mapa de identidad local)" step_19b_instance_identity
+run_step STEP_15B "Escribir instance-identity.json (mapa de identidad local)" step_15b_instance_identity
 
 # =============================================================================
 # SECCIÓN 7 — Fase F: Servicios y seguridad (pasos 27-36)
 # =============================================================================
 
-# Los pasos 27-29 leen de DEPLOY_TMP. Si la sección anterior fue saltada por el checkpoint
+# Los pasos 27-29 leen de DEPLOY_TMP. Si la sección anterior no se ejecutó,
 # o el árbol está incompleto (p.ej. borrado manual), lo regeneramos.
 # Comprobamos ficheros clave, no solo que el directorio exista.
-if [[ ! -f "${DEPLOY_TMP}/fase-0/etc/sudoers.d/${AGENT_NAME}" ]] || \
+if [[ ! -f "${DEPLOY_TMP}/fase-0/etc/sudoers.d/agent" ]] || \
    [[ ! -f "${DEPLOY_TMP}/fase-0/systemd/claude-telegram.service" ]]; then
   log_info "DEPLOY_TMP incompleto o ausente — regenerando..."
   prepare_deploy_tmp
 fi
 
-step_27_systemd_units() {
+step_21_systemd_units() {
   local sd="${DEPLOY_TMP}/fase-0/systemd"
   local unit
   for unit in claude-telegram.service heartbeat.timer heartbeat.service midnight.timer midnight.service; do
@@ -828,8 +788,8 @@ step_27_systemd_units() {
   done
 }
 
-step_28_sudoers() {
-  local src="${DEPLOY_TMP}/fase-0/etc/sudoers.d/${AGENT_NAME}"
+step_22_sudoers() {
+  local src="${DEPLOY_TMP}/fase-0/etc/sudoers.d/agent"
   if [[ ! -f "${src}" ]]; then
     log_fail "No existe el sudoers template: ${src}"
     return 1
@@ -839,8 +799,8 @@ step_28_sudoers() {
   lxc_exec "visudo -cf /etc/sudoers.d/${AGENT_NAME}"
 }
 
-step_29_apparmor() {
-  local src="${DEPLOY_TMP}/fase-1/apparmor/home.${AGENT_NAME}.claude"
+step_23_apparmor() {
+  local src="${DEPLOY_TMP}/fase-1/apparmor/apparmor-profile"
   if [[ ! -f "${src}" ]]; then
     log_fail "No existe el perfil AppArmor: ${src}"
     return 1
@@ -864,13 +824,13 @@ step_29_apparmor() {
   fi
 }
 
-step_30_enable_start() {
+step_24_enable_start() {
   lxc_exec "systemctl daemon-reload"
   lxc_exec "systemctl enable claude-telegram.service heartbeat.timer midnight.timer"
-  lxc_exec "systemctl start claude-telegram.service"
+  lxc_exec "systemctl start claude-telegram.service heartbeat.timer midnight.timer"
 }
 
-step_31_verify_service() {
+step_25_verify_service() {
   echo ""
   lxc_exec "systemctl status claude-telegram.service --no-pager" || true
   echo ""
@@ -886,55 +846,65 @@ step_31_verify_service() {
   fi
 }
 
-run_step STEP_27 "Copiar y registrar unit files systemd"      step_27_systemd_units
-run_step STEP_28 "Crear sudoers del agente"                   step_28_sudoers
-run_step STEP_29 "Cargar perfil AppArmor (modo complain)"     step_29_apparmor
-run_step STEP_30 "daemon-reload + enable + start"             step_30_enable_start
-run_step STEP_31 "Verificar servicio arrancado"               step_31_verify_service
+# =============================================================================
+# SECCIÓN 4 — Servicios y arranque (STEP_16-28)
+# =============================================================================
+run_step STEP_16 "Instalar Node.js"                            step_16_node
+run_step STEP_17 "Instalar Bun"                                step_17_bun
+run_step STEP_18 "Instalar MCP PostgreSQL"                     step_18_mcp_postgres
+run_step STEP_19 "Instalar plugin Telegram"                    step_19_telegram_plugin
+run_step STEP_20 "Configurar acceso Telegram (allowlist)"  step_20_telegram_access
+
+run_step STEP_21 "Copiar y registrar unit files systemd"      step_21_systemd_units
+run_step STEP_22 "Crear sudoers del agente"                   step_22_sudoers
+# run_step STEP_23 "Cargar perfil AppArmor (modo complain)"     step_23_apparmor  # Pendiente: requiere namespacing AppArmor en host PVE
+run_step STEP_24 "daemon-reload + enable + start"             step_24_enable_start
+run_step STEP_25 "Verificar servicio arrancado"               step_25_verify_service
 
 # =============================================================================
 # SECCIÓN 8 — Fase G: Pairing Telegram (pasos 37-39)
 # =============================================================================
 
-step_32_pairing() {
-  # El access.json ya fue pre-poblado en STEP_17 con el chat_id del owner.
-  # No se necesita pairing manual. Solo verificar que el servicio responde.
+step_26_telegram_verify() {
+  # El access.json ya tiene dmPolicy:allowlist (STEP_20).
   manual_box
   cat <<EOF
-${BOLD}Verificar que el agente responde por Telegram${RESET}
+${BOLD}Verificar Telegram${RESET}
 
-El pairing ya está hecho automáticamente (STEP_17 pre-pobl el access.json con tu chat_id).
+El acceso está configurado con allowlist (sin pairing).
 
-Envía "hola" al bot desde Telegram — el agente debe responder.
-Si no responde en 30 segundos, comprueba los logs:
+Envía cualquier mensaje al bot desde Telegram y comprueba que el agente responde.
+
+Si no responde en 30 segundos, revisa los logs:
    ${GREEN}pct exec ${VMID} -- journalctl -u claude-telegram.service -n 50${RESET}
+   ${GREEN}pct exec ${VMID} -- tail -50 /home/${AGENT_NAME}/logs/claude-telegram.log${RESET}
 EOF
   echo ""
-  read -rp "Pulsa ENTER cuando el agente haya respondido..."
+  read -rp "Pulsa ENTER cuando el agente haya respondido correctamente..."
   lxc_exec "systemctl is-active claude-telegram.service" | grep -q '^active' || {
     log_warn "El servicio no está active. Arráncalo: pct exec ${VMID} -- systemctl start claude-telegram.service"
   }
   return 0
 }
 
-run_step STEP_32 "Emparejar Telegram (manual)"                step_32_pairing
+run_step STEP_26 "Emparejar Telegram (manual)"                step_26_telegram_verify
 
 # =============================================================================
 # SECCIÓN 9 — Verificación final (pasos 42-48)
 # =============================================================================
 
-step_33_final_checks() {
+step_27_final_checks() {
   echo ""
   log_info "Verificaciones automáticas:"
 
   echo ""
   log_info "[pytest] Suite de tests del harness:"
-  lxc_exec "su -s /bin/bash ${AGENT_NAME} -c 'python3 -m pytest /home/${AGENT_NAME}/workspace/tests/ -q'" \
+  lxc_exec "su -s /bin/bash ${AGENT_NAME} -c 'cd /home/${AGENT_NAME} && python3 -m pytest /home/${AGENT_NAME}/workspace/tests/ -q'" \
     || log_warn "pytest reportó fallos o el harness aún no está completo (§4 F0-F5). Revisar."
 
   echo ""
   log_info "[postgres] Conteo de agent_memory (criterio duro — debe responder sin error):"
-  if lxc_exec "su -s /bin/bash ${AGENT_NAME} -c 'set -a; . /etc/${AGENT_NAME}/secrets.env; set +a; psql \"\$POSTGRES_CONNECTION_STRING\" -tAc \"SELECT COUNT(*) FROM agent_memory WHERE agent_id='\''${AGENT_NAME}'\'';\"'"; then
+  if lxc_exec "su -s /bin/bash ${AGENT_NAME} -c 'set -a; . /etc/${AGENT_NAME}/secrets.env; set +a; psql \"\$POSTGRES_CONNECTION_STRING\" -tAc \"SELECT COUNT(*) FROM agent_memory;\"'"; then
     log_ok "agent_memory accesible con el usuario ${AGENT_NAME}."
   else
     log_fail "No se puede consultar agent_memory. Verifica: connection string en secrets.env, RLS, usuario ${AGENT_NAME} en la BD."
@@ -962,10 +932,52 @@ EOF
   return 0
 }
 
-run_step STEP_33 "Verificación final"                         step_33_final_checks
+run_step STEP_27 "Verificación final"                         step_27_final_checks
 
 # =============================================================================
-# SECCIÓN 10 — Mensaje final
+# SECCIÓN 10 — Onboarding (último paso)
+# =============================================================================
+
+step_28_onboarding() {
+  # Inyecta el bloque de onboarding en el CLAUDE.md del LXC.
+  # Este es el último paso: el sistema ya está verificado y funcionando.
+  # El próximo mensaje del usuario disparará el onboarding automáticamente.
+  lxc_exec "cat >> /home/${AGENT_NAME}/claude/CLAUDE.md <<'ONBOARDING'
+
+---
+
+## Primer arranque — LEER ESTO ANTES DE RESPONDER
+
+Este es el primer arranque del agente. El CLAUDE.md aún no contiene datos del usuario propietario.
+
+**Antes de responder al primer mensaje**, el agente debe:
+1. Avisar al usuario que es la primera sesión y que va a hacer unas preguntas de configuración
+2. Preguntar de forma conversacional (no como formulario): nombre completo, fecha de nacimiento, familia cercana (pareja, hijos con nombres y fechas), nivel técnico, principales usos del agente
+3. Preguntar el tono deseado: formal/informal, idioma preferido, estilo de respuesta
+4. Una vez recogida la información, actualizar este CLAUDE.md con los datos reales (Edit tool)
+5. Actualizar también ~/workspace/state/instance-identity.json (ya existe, creado por el instalador con agent/vmid/ip/hostname/owner_name) rellenando las claves que hasta ahora estaban vacías: profession, family, tech_level, use_cases, tone_style, language_preference — con el mismo texto que se acaba de escribir en el CLAUDE.md. Este fichero es local y nunca se propaga; es lo que permite reconstruir la forma agnóstica de un fichero si algún día hace falta.
+6. Borrar esta sección \"Primer arranque\" del CLAUDE.md una vez completado el onboarding
+7. Confirmar al usuario que la configuración está guardada
+
+El agente NO debe responder preguntas normales hasta completar este flujo de onboarding.
+ONBOARDING"
+  lxc_exec "chown ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}/claude/CLAUDE.md"
+  log_ok "Bloque de onboarding añadido a CLAUDE.md."
+  manual_box
+  cat <<EOF
+${BOLD}Onboarding listo${RESET}
+
+El CLAUDE.md incluye ahora la sección de onboarding.
+El próximo mensaje que envíes al agente disparará el proceso de configuración inicial.
+EOF
+  echo ""
+  read -rp "Pulsa ENTER para terminar..."
+}
+
+run_step STEP_28 "Inyectar onboarding en CLAUDE.md (último paso)" step_28_onboarding
+
+# =============================================================================
+# SECCIÓN 11 — Mensaje final
 # =============================================================================
 
 echo ""
@@ -979,14 +991,12 @@ cat <<EOF
   - IP       : ${IP_ADDRESS}
   - Servicio : claude-telegram.service
   - SSH      : entra como root (password establecida); usa el comando 'claude' para invocar al agente
-  - Checkpoint: ${CHECKPOINT_FILE}
-
   ${BOLD}Acciones manuales pendientes / a confirmar${RESET}
   1. AppArmor: si está en modo COMPLAIN, tras ejercitar el agente sin denegaciones:
        pct exec ${VMID} -- aa-enforce /etc/apparmor.d/home.${AGENT_NAME}.claude
   2. Verificaciones desde Telegram: /context, /skills, /reset (ver arriba).
   3. Onboarding: en el primer mensaje, el agente preguntará los datos del propietario
-     y reescribirá su CLAUDE.md (sección "Primer arranque").
+     STEP_28 inyecta el bloque de onboarding — el primer mensaje lo disparará.
   4. Filtro anti-injection (§1.8 paso 22b): el userprompt-hook arranca en fail-open
      hasta que exista /home/${AGENT_NAME}/apps/bin/clean. Implementar según §1.8 paso 22b.
   5. Crons (Fase H) NO instalados — diferidos a §8 (proactividad por core_task).
@@ -994,7 +1004,6 @@ cat <<EOF
      PGBACKREST_*) no se han escrito: añádelos a /etc/${AGENT_NAME}/secrets.env cuando
      despliegues sus secciones (§8.3, §9.9, §11.2, §11.4).
 
-  Para re-ejecutar este script: salta automáticamente los pasos ya completados.
-  Para empezar de cero: borra ${CHECKPOINT_FILE}.
+  Para re-ejecutar este script: vuelve a lanzarlo desde el principio.
 
 EOF
