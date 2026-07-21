@@ -171,13 +171,17 @@ CREATE TABLE core_task (
 );
 
 -- Filas iniciales. Solo se siembra aquí lo que ya cumple el contrato de salida
--- de heartbeat.py ({"ok","notify"} por stdout) -- self-improve/autoreset/
--- permission-audit siguen documentados en el diseño pero todavía no lo
--- cumplen (ver tareas-pendientes.md), sembrarlos generaría fallos silenciosos
--- cada vez que corrieran.
+-- de heartbeat.py ({"ok","notify"} por stdout) -- permission-audit sigue
+-- documentado en el diseño pero todavía no lo cumple (no tiene script
+-- todavía, ver tareas-pendientes.md), sembrarlo generaría fallos silenciosos
+-- cada vez que corriera.
 INSERT INTO core_task (name, description, schedule_cron, script_path) VALUES
   ('template-sync', 'Pull diario de ~/template/ desde claude-agent-deploy (fase 1: solo lectura)',
-   '0 5 * * *', 'workspace/scripts/lib/template_sync.py')
+   '0 5 * * *', 'workspace/scripts/lib/template_sync.py'),
+  ('autoreset', 'Reinicio nocturno automático si el servicio lleva >1h idle',
+   '0 4 * * *', 'workspace/scripts/lib/autoreset.py'),
+  ('self-improve', 'Auditoría semanal de automejora: recopila evidencia mecánica y delega la síntesis en el agente self-improve',
+   '0 3 * * 1', 'workspace/scripts/lib/self_improve.py')
 ON CONFLICT (name) DO NOTHING;
 
 -- ---- §8 Proactividad: schedule_config --------------------------------------

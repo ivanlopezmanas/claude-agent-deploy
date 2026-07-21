@@ -72,6 +72,15 @@ Para cada fila:
 - Si `agent` indica un subagente concreto (`opus`, `self-improve`, `session-summarizer`),
   delega solo si está justificado y permitido; en caso contrario marca `delegated` o
   `deferred`.
+- Caso especial — `payload.core_task == 'self-improve'` con `_script_outcome.ok = true` y
+  `_script_outcome.notify.context` presente: `self_improve.py` ya ha recopilado en Python
+  toda la evidencia mecánica (mapa de ficheros, tests, settings, log de permisos,
+  memorias). No redactes tú un mensaje a partir de ese `context` — invoca
+  `Agent(subagent_type='self-improve')` pasándole en el prompt ese `context` bajo un
+  encabezado `## Evidencia pre-recopilada` (JSON tal cual), más `OUTPUT_DIR`,
+  `TELEGRAM_CHAT_ID` y `LANGUAGE`. El agente `self-improve` es quien sintetiza, escribe el
+  informe y notifica por Telegram — esta sesión de heartbeat solo cierra la fila con
+  `decision = 'delegated'` cuando termine.
 
 ### 3. Cierra el estado de cada fila, por `id`
 

@@ -90,6 +90,18 @@
         "WebFetch",
         "mcp__postgres__query_data"
       ]
+    },
+    "self-improve": {
+      "_comment": "Auditor semanal de automejora (Opus). Via heartbeat/core_task 'self-improve', self_improve.py ya deja evidencia mecanica pre-recopilada (territorio, tests, settings, log de permisos, memorias) en el prompt -- el camino normal solo usa Read/Bash para lectura dirigida de codigo (paso 6) y Write para el informe. Bash sin restringir porque el catalogo de comandos de auditoria varia (grep, date, claude --version, systemctl status, pytest) y el propio agente lo mantiene de solo lectura.",
+      "allow": [
+        "Read",
+        "Bash",
+        "Write(*/workspace/docs/improvements/*)",
+        "mcp__postgres__query_data",
+        "mcp__postgres__count_rows",
+        "mcp__postgres__get_table_sample",
+        "mcp__plugin_telegram_telegram__reply"
+      ]
     }
   }
 }
