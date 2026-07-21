@@ -146,13 +146,6 @@ def close_row(cur, row_id, decision: str) -> None:
     )
 
 
-def mark_core_task_executed(cur, core_task_name: str) -> None:
-    cur.execute(
-        "UPDATE core_task SET last_executed_at = now() WHERE name = %s",
-        (core_task_name,),
-    )
-
-
 def is_task_with_script(row: dict) -> bool:
     payload = row.get('payload')
     return (row.get('event_type') == 'task'
@@ -174,9 +167,6 @@ def classify_and_dispatch(cur, rows: list) -> list:
             outcome = run_task_script(row)
             if outcome['resolved']:
                 close_row(cur, row['id'], 'dropped')
-                core_task_name = row['payload'].get('core_task')
-                if core_task_name:
-                    mark_core_task_executed(cur, core_task_name)
                 log(f"[TASK] '{row['source']}' resuelta por script, sin modelo")
                 continue
             row['_script_outcome'] = outcome

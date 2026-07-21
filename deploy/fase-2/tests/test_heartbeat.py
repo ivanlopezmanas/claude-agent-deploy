@@ -218,7 +218,10 @@ class TestClassifyAndDispatch:
         assert len(update_queries) == 1
         assert cur.queries[0][1] == ("dropped", "t1")
 
-    def test_resolved_task_updates_core_task_when_named(self, monkeypatch):
+    def test_resolved_task_with_core_task_payload_closes_without_extra_query(self, monkeypatch):
+        # payload.core_task es solo una etiqueta informativa del origen
+        # (scheduled_task kind='core') -- heartbeat.py no hace bookkeeping
+        # propio sobre ella, el estado ya vive en agent_inbox.
         monkeypatch.setattr(hb.subprocess, "run",
                              lambda *a, **k: _FakeCompleted(0, _contract_stdout(True, None)))
         cur = _FakeCursor()
@@ -227,8 +230,8 @@ class TestClassifyAndDispatch:
 
         hb.classify_and_dispatch(cur, rows)
 
-        core_task_queries = [(q, p) for q, p in cur.queries if "core_task" in q]
-        assert core_task_queries[0][1] == ("backup-diario",)
+        assert len(cur.queries) == 1
+        assert cur.queries[0][1] == ("dropped", "t1")
 
     def test_failed_task_script_goes_to_model_with_outcome_attached(self, monkeypatch):
         stdout = _contract_stdout(False, {"severity": "high", "message": None, "context": "disco lleno"})

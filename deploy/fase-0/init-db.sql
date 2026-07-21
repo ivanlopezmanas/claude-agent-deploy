@@ -6,7 +6,7 @@
 --   Este password DEBE coincidir con el de POSTGRES_CONNECTION_STRING en
 --   /etc/<agent>/secrets.env (paso 15 del checklist §1.8).
 --
--- Crea: usuario <agent>, base de datos agents, las 12 tablas + índices,
+-- Crea: usuario <agent>, base de datos agents, las 11 tablas + índices,
 -- Row Level Security sobre agent_memory y el dato semilla del owner.
 -- El orden respeta dependencias FK y es ejecutable de arriba a abajo.
 
@@ -20,10 +20,10 @@ CREATE DATABASE agents OWNER <agent>;
 \c agents
 
 -- ============================================================================
--- 2. Schema completo (§1.2) — 12 tablas + índices
+-- 2. Schema completo (§1.2) — 11 tablas + índices
 --    Orden FK-seguro:
 --      agent_domains, pending_prompts, agent_memory, slot_type, scheduled_task,
---      agent_inbox, core_task, schedule_config, daily_schedule, agent_telemetry,
+--      agent_inbox, schedule_config, daily_schedule, agent_telemetry,
 --      agent_backup_log, agent_user_roles
 -- ============================================================================
 
@@ -105,15 +105,27 @@ CREATE TABLE slot_type (
 );
 
 -- ---- §8 Proactividad: scheduled_task ---------------------------------------
+-- 'briefing'/'monitor' = contenido proactivo, redactado por el modelo a partir
+-- de prompt_file. 'core' = mantenimiento determinista, ejecutado por
+-- heartbeat.py sin pasar por el modelo (ver script_path, contrato en
+-- heartbeat.py). Ambos comparten horario vía schedule_config -- no hay razón
+-- para que el mantenimiento tenga su propia tabla de scheduling aparte.
 CREATE TABLE scheduled_task (
-  id          SERIAL PRIMARY KEY,
-  name        TEXT NOT NULL UNIQUE,
-  label       TEXT NOT NULL,
-  kind        TEXT NOT NULL CHECK (kind IN ('briefing','monitor')),
-  prompt_file TEXT NOT NULL,
-  severity    TEXT NOT NULL DEFAULT 'medium'
-                CHECK (severity IN ('critical','high','medium','low')),
-  enabled     BOOLEAN NOT NULL DEFAULT true
+  id               SERIAL PRIMARY KEY,
+  name             TEXT NOT NULL UNIQUE,
+  label            TEXT NOT NULL,
+  kind             TEXT NOT NULL CHECK (kind IN ('briefing','monitor','core')),
+  prompt_file      TEXT,
+  script_path      TEXT,
+  severity         TEXT NOT NULL DEFAULT 'medium'
+                     CHECK (severity IN ('critical','high','medium','low')),
+  enabled          BOOLEAN NOT NULL DEFAULT true,
+
+  CONSTRAINT chk_kind_target CHECK (
+    (kind = 'core' AND script_path IS NOT NULL AND prompt_file IS NULL)
+    OR
+    (kind IN ('briefing','monitor') AND prompt_file IS NOT NULL AND script_path IS NULL)
+  )
 );
 
 -- ---- §8 Proactividad: agent_inbox ------------------------------------------
@@ -158,30 +170,18 @@ CREATE UNIQUE INDEX inbox_dedupe
   ON agent_inbox (source, event_type, dedupe_key)
   WHERE processed_at IS NULL AND dedupe_key IS NOT NULL;
 
--- ---- §8 Proactividad: core_task --------------------------------------------
-CREATE TABLE core_task (
-  id               SERIAL PRIMARY KEY,
-  name             TEXT NOT NULL UNIQUE,
-  description      TEXT,
-  schedule_cron    TEXT NOT NULL,           -- expresión cron estándar: '0 4 * * *'
-  script_path      TEXT NOT NULL,           -- ruta dentro del home del agente
-  enabled          BOOLEAN NOT NULL DEFAULT true,
-  last_enqueued_at TIMESTAMPTZ,             -- cuándo midnight generó la última entrada en inbox
-  last_executed_at TIMESTAMPTZ              -- cuándo el heartbeat procesó la última ejecución
-);
-
--- Filas iniciales. Solo se siembra aquí lo que ya cumple el contrato de salida
--- de heartbeat.py ({"ok","notify"} por stdout) -- permission-audit sigue
--- documentado en el diseño pero todavía no lo cumple (no tiene script
--- todavía, ver tareas-pendientes.md), sembrarlo generaría fallos silenciosos
--- cada vez que corriera.
-INSERT INTO core_task (name, description, schedule_cron, script_path) VALUES
+-- Filas iniciales de mantenimiento (kind='core'). Solo se siembra aquí lo que
+-- ya cumple el contrato de salida de heartbeat.py ({"ok","notify"} por
+-- stdout) -- permission-audit sigue documentado en el diseño pero todavía no
+-- lo cumple (no tiene script propio, ver tareas-pendientes.md), sembrarlo
+-- generaría fallos silenciosos cada vez que corriera.
+INSERT INTO scheduled_task (name, label, kind, script_path, severity) VALUES
   ('template-sync', 'Pull diario de ~/template/ desde claude-agent-deploy (fase 1: solo lectura)',
-   '0 5 * * *', 'workspace/scripts/lib/template_sync.py'),
+   'core', 'workspace/scripts/lib/template_sync.py', 'low'),
   ('autoreset', 'Reinicio nocturno automático si el servicio lleva >1h idle',
-   '0 4 * * *', 'workspace/scripts/lib/autoreset.py'),
+   'core', 'workspace/scripts/lib/autoreset.py', 'low'),
   ('self-improve', 'Auditoría semanal de automejora: recopila evidencia mecánica y delega la síntesis en el agente self-improve',
-   '0 3 * * 1', 'workspace/scripts/lib/self_improve.py')
+   'core', 'workspace/scripts/lib/self_improve.py', 'low')
 ON CONFLICT (name) DO NOTHING;
 
 -- ---- §8 Proactividad: schedule_config --------------------------------------
@@ -217,11 +217,28 @@ CREATE TABLE schedule_config (
     date_to IS NULL OR date_from IS NULL OR date_to >= date_from
   ),
   CONSTRAINT chk_day_type CHECK (
-    day_type IN ('1','2','3','4','5','6','7','H','T','S')
+    day_type IN ('1','2','3','4','5','6','7','H','T','S','*')
+    -- '*' = todos los días, sin importar tipo (uso pensado para scheduled_task
+    -- kind='core': mantenimiento que no depende de si el día es laborable/festivo/viaje).
   )
 );
 
 CREATE INDEX ON schedule_config (day_type, kind) WHERE enabled = true;
+
+-- Evita doble-reserva del mismo scheduled_task en el mismo day_type.
+CREATE UNIQUE INDEX schedule_config_task_unique
+  ON schedule_config (day_type, scheduled_task_id)
+  WHERE kind = 'task' AND scheduled_task_id IS NOT NULL;
+
+-- Horario de las 3 tareas 'core' sembradas arriba. Diarias -> day_type='*';
+-- self-improve es semanal (lunes) -> day_type='1' (ver ISO_TO_DAYTYPE en
+-- midnight.py: '1'..'7' = lunes..domingo).
+INSERT INTO schedule_config (day_type, kind, scheduled_task_id, time_from) VALUES
+  ('*', 'task', (SELECT id FROM scheduled_task WHERE name = 'template-sync'), '05:00'),
+  ('*', 'task', (SELECT id FROM scheduled_task WHERE name = 'autoreset'), '04:00'),
+  ('1', 'task', (SELECT id FROM scheduled_task WHERE name = 'self-improve'), '03:00')
+ON CONFLICT (day_type, scheduled_task_id) WHERE kind = 'task' AND scheduled_task_id IS NOT NULL
+  DO NOTHING;
 
 -- ---- §8 Proactividad: daily_schedule ---------------------------------------
 CREATE TABLE daily_schedule (

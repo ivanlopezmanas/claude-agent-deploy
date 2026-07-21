@@ -75,7 +75,7 @@ LXC (`/home/<agent>/...`, `/etc/...`, `/etc/systemd/system/...`) y el `chmod +x`
 | `fase-futura/scripts/lib/distill-transcript.py` | `/home/<agent>/workspace/scripts/lib/distill-transcript.py` | Reduce el transcript a líneas relevantes |
 | `fase-futura/scripts/lib/<agent>-autoreset.py` | `/home/<agent>/workspace/scripts/lib/<agent>-autoreset.py` | Reinicio nocturno (idle>1h → restart; activo → reintento) |
 | `fase-futura/scripts/lib/self-improve.sh` | `/home/<agent>/workspace/scripts/lib/self-improve.sh` | Lanza el agente self-improve (<AGENT>_CONTEXT=cron, settings-background) |
-| `fase-futura/scripts/lib/midnight.py` | `/home/<agent>/workspace/scripts/lib/midnight.py` | Job de medianoche: reconcilia core_task + materializa daily_schedule |
+| `fase-futura/scripts/lib/midnight.py` | `/home/<agent>/workspace/scripts/lib/midnight.py` | Job de medianoche: recorre schedule_config y rehace el día — daily_schedule (slots) + agent_inbox (scheduled_task, incluye mantenimiento kind='core') |
 
 ---
 
