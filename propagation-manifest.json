@@ -1,0 +1,51 @@
+{
+  "_meta": {
+    "description": "Qué se puede propagar de una instancia desplegada de vuelta al template (fase 2, push), y adónde en el repo aterriza cada cosa. Vive en la raíz del repo porque tiene que ser lo mismo para todas las instancias -- lo mantiene quien evoluciona el template (Iván + agente, revisable en PR), no cada instancia por su cuenta. Se sincroniza a ~/template/ igual que cualquier otro fichero del repo, vía el pull diario de fase 1 (template-sync).",
+    "classifications": {
+      "propagable": "Se puede reversar (template_reverse.py) y proponer para push. Necesita repo_dir: dónde en el repo aterriza.",
+      "never": "Nunca propagable bajo ningún concepto -- secretos, memoria, identidad, estado local. template_push.py debe rechazar sin excepción, sin preguntar.",
+      "mixed": "Identidad y contenido agnóstico entremezclados en el mismo fichero. Solo lo delimitado por marcadores TEMPLATE:BEGIN/TEMPLATE:END (ver template_reverse.py) se propaga; el resto del fichero ni se lee para este propósito."
+    },
+    "resolution_order": "Reglas evaluadas en orden; la primera cuyo 'match' sea prefijo (para directorios) o coincidencia exacta (para ficheros) de la ruta candidata (relativa al HOME del agente) gana. Las entradas más específicas van antes que las generales -- si no hay match, el fichero se trata como no cubierto por el manifiesto y la skill debe rechazarlo, nunca inventar un destino."
+  },
+  "rules": [
+    { "match": "etc/<agent>/secrets.env", "classification": "never" },
+    { "match": "workspace/state/", "classification": "never" },
+    { "match": "claude/.claude/", "classification": "never" },
+    { "match": "claude/.claude.json", "classification": "never" },
+    { "match": ".ssh/", "classification": "never" },
+    { "match": "template/", "classification": "never" },
+    { "match": "logs/", "classification": "never" },
+    { "match": "claude/CLAUDE.md", "classification": "mixed", "repo_path": "deploy/fase-0/CLAUDE.md" },
+
+    { "match": "workspace/scripts/lib/heartbeat.py", "classification": "propagable", "repo_path": "deploy/fase-0/scripts/lib/heartbeat.py" },
+    { "match": "workspace/scripts/lib/ticker.py", "classification": "propagable", "repo_path": "deploy/fase-0/scripts/lib/ticker.py" },
+    { "match": "workspace/scripts/lib/register-commands.py", "classification": "propagable", "repo_path": "deploy/fase-0/scripts/lib/register-commands.py" },
+    { "match": "workspace/scripts/lib/telegram-server.ts", "classification": "propagable", "repo_path": "deploy/fase-0/scripts/lib/telegram-server.ts" },
+    { "match": "workspace/scripts/lib/claude-telegram-start.sh", "classification": "propagable", "repo_path": "deploy/fase-0/scripts/lib/claude-telegram-start.sh" },
+    { "match": "workspace/scripts/lib/patch-telegram-plugin.sh", "classification": "propagable", "repo_path": "deploy/fase-0/scripts/lib/patch-telegram-plugin.sh" },
+    { "match": "workspace/scripts/lib/retrofit-template.sh", "classification": "propagable", "repo_path": "deploy/fase-0/scripts/lib/retrofit-template.sh" },
+
+    { "match": "workspace/scripts/lib/common.py", "classification": "propagable", "repo_path": "deploy/fase-1/scripts/lib/common.py" },
+    { "match": "workspace/scripts/lib/workspace.json", "classification": "propagable", "repo_path": "deploy/fase-1/scripts/lib/workspace.json" },
+    { "match": "workspace/scripts/lib/agent-permissions.json", "classification": "propagable", "repo_path": "deploy/fase-1/scripts/lib/agent-permissions.json" },
+
+    { "match": "workspace/scripts/lib/verify_agents.py", "classification": "propagable", "repo_path": "deploy/fase-2/scripts/lib/verify_agents.py" },
+    { "match": "workspace/scripts/lib/template_reverse.py", "classification": "propagable", "repo_path": "deploy/fase-2/scripts/lib/template_reverse.py" },
+    { "match": "workspace/scripts/lib/template_guard.py", "classification": "propagable", "repo_path": "deploy/fase-2/scripts/lib/template_guard.py" },
+    { "match": "workspace/scripts/lib/template_push.py", "classification": "propagable", "repo_path": "deploy/fase-2/scripts/lib/template_push.py" },
+
+    { "match": "workspace/scripts/lib/autoreset.py", "classification": "propagable", "repo_path": "deploy/fase-futura/scripts/lib/autoreset.py" },
+    { "match": "workspace/scripts/lib/midnight.py", "classification": "propagable", "repo_path": "deploy/fase-futura/scripts/lib/midnight.py" },
+    { "match": "workspace/scripts/lib/chronicler.py", "classification": "propagable", "repo_path": "deploy/fase-futura/scripts/lib/chronicler.py" },
+    { "match": "workspace/scripts/lib/distill-transcript.py", "classification": "propagable", "repo_path": "deploy/fase-futura/scripts/lib/distill-transcript.py" },
+    { "match": "workspace/scripts/lib/self-improve.sh", "classification": "propagable", "repo_path": "deploy/fase-futura/scripts/lib/self-improve.sh" },
+    { "match": "workspace/scripts/lib/template_sync.py", "classification": "propagable", "repo_path": "deploy/fase-futura/scripts/lib/template_sync.py" },
+
+    { "match": "workspace/scripts/lib/", "classification": "propagable", "repo_dir": "deploy/fase-futura/scripts/lib/", "note": "fallback para scripts nuevos sin entrada explícita arriba -- fase-futura es donde aterrizan las librerías más recientes" },
+    { "match": "workspace/scripts/hooks/", "classification": "propagable", "repo_dir": "deploy/fase-1/scripts/hooks/" },
+    { "match": "workspace/tests/", "classification": "propagable", "repo_dir": "deploy/fase-2/tests/" },
+    { "match": "claude/.claude/agents/", "classification": "propagable", "repo_dir": "deploy/fase-2/agents/" },
+    { "match": "claude/.claude/skills/", "classification": "propagable", "repo_dir": "deploy/fase-2/skills/" }
+  ]
+}

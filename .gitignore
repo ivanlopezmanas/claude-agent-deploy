@@ -1,0 +1,15 @@
+# Secretos: nunca deben llegar al repo, ni siquiera por accidente durante
+# desarrollo del template. Los secretos reales de una instancia viven en
+# /etc/<agent>/secrets.env y ~/workspace/state/instance-identity.json,
+# fuera de cualquier clon de este repo.
+secrets.env
+*.env
+instance-identity.json
+
+# Artefactos de Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Artefactos de editor/SO
+.DS_Store

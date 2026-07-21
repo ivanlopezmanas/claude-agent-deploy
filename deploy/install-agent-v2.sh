@@ -174,6 +174,8 @@ ask_secret_confirm PG_PASSWORD        "Password de PostgreSQL (oculto)"
 ask_secret TELEGRAM_BOT_TOKEN "Bot token de Telegram (oculto)"
 ask TELEGRAM_CHAT_ID  "Chat ID del propietario"         ""
 ask OWNER_NAME        "Nombre del propietario (para la BD)"  ""
+ask_secret GITHUB_TOKEN    "Token de GitHub para que el agente pueda propagar mejoras al template vía PR (oculto; fase 2 de claude-agent-deploy)"
+ask GITHUB_USERNAME   "Usuario de GitHub asociado a ese token (para el email de commit del agente)" ""
 read -rp "Clave pública SSH del propietario (opcional, ENTER para omitir): " OWNER_SSH_KEY
 ask DEPLOY_SRC        "Directorio con los templates"    "${SCRIPT_DIR}"
 ask PROXMOX_TEMPLATE  "Template LXC"                    "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
@@ -214,6 +216,8 @@ cat <<EOF
   Agent password    : (oculto, ${#AGENT_PASSWORD} caracteres)
   PG password       : (oculto, ${#PG_PASSWORD} caracteres)
   Bot token         : (oculto, ${#TELEGRAM_BOT_TOKEN} caracteres)
+  GitHub token      : (oculto, ${#GITHUB_TOKEN} caracteres)
+  GitHub username   : ${GITHUB_USERNAME}
   Templates (src)   : ${DEPLOY_SRC}
   Template LXC      : ${PROXMOX_TEMPLATE}
 EOF
@@ -531,12 +535,14 @@ step_12_secrets_fill() {
 TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
 TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
 POSTGRES_CONNECTION_STRING=postgresql://${AGENT_NAME}:${PG_PASSWORD}@localhost:5432/agents
+GITHUB_TOKEN=${GITHUB_TOKEN}
+GITHUB_USERNAME=${GITHUB_USERNAME}
 EOF
   pct push "${VMID}" "${tmp_secrets}" "/etc/${AGENT_NAME}/secrets.env" --perms 640
   lxc_exec "chown root:${AGENT_NAME} /etc/${AGENT_NAME}/secrets.env"
   rm -f "${tmp_secrets}"
   # Verificar (sin imprimir el contenido): solo que las claves obligatorias están
-  lxc_exec "grep -q '^TELEGRAM_BOT_TOKEN=' /etc/${AGENT_NAME}/secrets.env && grep -q '^POSTGRES_CONNECTION_STRING=' /etc/${AGENT_NAME}/secrets.env"
+  lxc_exec "grep -q '^TELEGRAM_BOT_TOKEN=' /etc/${AGENT_NAME}/secrets.env && grep -q '^POSTGRES_CONNECTION_STRING=' /etc/${AGENT_NAME}/secrets.env && grep -q '^GITHUB_TOKEN=' /etc/${AGENT_NAME}/secrets.env"
 }
 
 run_step STEP_11 "Crear /etc/${AGENT_NAME}/secrets.env"        step_11_secrets_file
@@ -709,6 +715,52 @@ step_15_workspace() {
 }
 
 run_step STEP_15 "Copiar workspace y harness al LXC"     step_15_workspace
+
+step_15b_instance_identity() {
+  # instance-identity.json: mapa placeholder->valor real de ESTA instancia.
+  # Local, nunca sale de la máquina (fase 2, propagación template<->instancia:
+  # es lo que hace determinista y auditable la traducción inversa agnóstico<-real).
+  # Lo que el instalador ya conoce se rellena aquí; lo que solo conoce el
+  # onboarding conversacional (profession/family/tech_level/use_cases/
+  # tone_style/language_preference) se deja vacío -- lo completa el propio
+  # onboarding al rellenar CLAUDE.md.
+  local AH="/home/${AGENT_NAME}"
+  local tmp_identity="/tmp/instance-identity-${AGENT_NAME}-${VMID}.json"
+  local IP_ADDRESS_BARE="${IP_ADDRESS%%/*}"  # sin máscara CIDR, como aparece en el texto renderizado
+  umask 077
+  AGENT_NAME="${AGENT_NAME}" AGENT_UPPER="${AGENT_UPPER}" AGENT_TITLE="${AGENT_TITLE}" \
+  VMID="${VMID}" IP_ADDRESS="${IP_ADDRESS_BARE}" LXC_HOSTNAME="${LXC_HOSTNAME}" OWNER_NAME="${OWNER_NAME}" \
+  python3 - "${tmp_identity}" <<'PYEOF'
+import json
+import os
+import sys
+
+data = {
+    "agent": os.environ["AGENT_NAME"],
+    "Agent": os.environ["AGENT_TITLE"],
+    "AGENT": os.environ["AGENT_UPPER"],
+    "vmid": os.environ["VMID"],
+    "ip_address": os.environ["IP_ADDRESS"],
+    "hostname": os.environ["LXC_HOSTNAME"],
+    "owner_name": os.environ["OWNER_NAME"],
+    "profession": "",
+    "family": "",
+    "tech_level": "",
+    "use_cases": "",
+    "tone_style": "",
+    "language_preference": "",
+}
+with open(sys.argv[1], "w") as f:
+    json.dump(data, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+PYEOF
+  lxc_exec "mkdir -p ${AH}/workspace/state"
+  pct push "${VMID}" "${tmp_identity}" "${AH}/workspace/state/instance-identity.json" --perms 600
+  lxc_exec "chown ${AGENT_NAME}:${AGENT_NAME} ${AH}/workspace/state/instance-identity.json"
+  rm -f "${tmp_identity}"
+}
+
+run_step STEP_15B "Escribir instance-identity.json (mapa de identidad local)" step_15b_instance_identity
 
 # =============================================================================
 # SECCIÓN 7 — Fase F: Servicios y seguridad (pasos 27-36)
@@ -903,8 +955,9 @@ Este es el primer arranque del agente. El CLAUDE.md aún no contiene datos del u
 2. Preguntar de forma conversacional (no como formulario): nombre completo, fecha de nacimiento, familia cercana (pareja, hijos con nombres y fechas), nivel técnico, principales usos del agente
 3. Preguntar el tono deseado: formal/informal, idioma preferido, estilo de respuesta
 4. Una vez recogida la información, actualizar este CLAUDE.md con los datos reales (Edit tool)
-5. Borrar esta sección \"Primer arranque\" del CLAUDE.md una vez completado el onboarding
-6. Confirmar al usuario que la configuración está guardada
+5. Actualizar también ~/workspace/state/instance-identity.json (ya existe, creado por el instalador con agent/vmid/ip/hostname/owner_name) rellenando las claves que hasta ahora estaban vacías: profession, family, tech_level, use_cases, tone_style, language_preference — con el mismo texto que se acaba de escribir en el CLAUDE.md. Este fichero es local y nunca se propaga; es lo que permite reconstruir la forma agnóstica de un fichero si algún día hace falta.
+6. Borrar esta sección \"Primer arranque\" del CLAUDE.md una vez completado el onboarding
+7. Confirmar al usuario que la configuración está guardada
 
 El agente NO debe responder preguntas normales hasta completar este flujo de onboarding.
 ONBOARDING"

@@ -8,6 +8,8 @@
     { "path": "/home/<agent>/workspace/scripts/",                          "tier": "T2",    "policy": "con-permiso" },
     { "path": "/home/<agent>/workspace/tests/",                            "tier": "T1",    "policy": "libre" },
     { "path": "/home/<agent>/template/",                                   "tier": "T1",    "policy": "libre", "note": "Clon persistente del template agnóstico (status/fetch/pull/edición libres; git push ya requiere confirmación vía regla global is_irreversible, fase 2 lo formaliza)" },
+    { "path": "/home/<agent>/workspace/state/instance-identity.json",      "tier": "T2",    "policy": "con-permiso", "note": "Mapa de identidad local para la traducción agnóstica<->real (fase 2 push); nunca se propaga" },
+    { "path": "/home/<agent>/workspace/state/",                           "tier": "T1",    "policy": "libre", "note": "Estado interno de scripts (locks, SHA notificado); persistente, análogo a logs/" },
     { "path": "/home/<agent>/workspace/scripts/hooks/",                       "tier": "T3",    "policy": "con-permiso", "note": "Hooks del harness; cambio = security review" },
     { "path": "/home/<agent>/workspace/scripts/lib/common.py",                "tier": "T3",    "policy": "con-permiso" },
     { "path": "/home/<agent>/workspace/scripts/lib/workspace.json",    "tier": "T3",    "policy": "con-permiso" },
