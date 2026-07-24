@@ -61,15 +61,119 @@ class _FakeConn:
         self.closed = True
 
 
+# ----------------------------------------------------------------- load_calendar_ids()
+class TestLoadCalendarIds:
+    def test_missing_file_returns_empty(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(mn, "CALENDARS_CONFIG_PATH", str(tmp_path / "no-existe.json"))
+        assert mn.load_calendar_ids() == []
+
+    def test_invalid_json_returns_empty(self, monkeypatch, tmp_path):
+        cfg = tmp_path / "calendars.json"
+        cfg.write_text("{no es json")
+        monkeypatch.setattr(mn, "CALENDARS_CONFIG_PATH", str(cfg))
+        assert mn.load_calendar_ids() == []
+
+    def test_reads_ids_from_calendars_entries(self, monkeypatch, tmp_path):
+        cfg = tmp_path / "calendars.json"
+        cfg.write_text(json.dumps({"calendars": [
+            {"calendario": "personal", "descripcion": "Personal", "id": "primary"},
+            {"calendario": "silvia", "descripcion": "Silvia", "id": "xyz@group.calendar.google.com"},
+        ]}))
+        monkeypatch.setattr(mn, "CALENDARS_CONFIG_PATH", str(cfg))
+        assert mn.load_calendar_ids() == ["primary", "xyz@group.calendar.google.com"]
+
+    def test_skips_entries_without_id(self, monkeypatch, tmp_path):
+        cfg = tmp_path / "calendars.json"
+        cfg.write_text(json.dumps({"calendars": [{"calendario": "sin_id", "descripcion": "x"}]}))
+        monkeypatch.setattr(mn, "CALENDARS_CONFIG_PATH", str(cfg))
+        assert mn.load_calendar_ids() == []
+
+
 # ----------------------------------------------------------------- resolve_calendar_day_type()
+class _FakeHTTPResponse:
+    def __init__(self, payload: dict):
+        self._body = json.dumps(payload).encode("utf-8")
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
 class TestResolveCalendarDayType:
-    def test_returns_none_without_webhook_configured(self, monkeypatch):
+    def _configure(self, monkeypatch, calendar_ids=("primary",)):
+        monkeypatch.setattr(mn, "N8N_CALENDAR_WEBHOOK_URL", "https://n8n.example/webhook/calendar-events")
+        monkeypatch.setattr(mn, "N8N_WEBHOOK_SECRET", "s3cr3t")
+        monkeypatch.setattr(mn, "load_calendar_ids", lambda: list(calendar_ids))
+
+    def test_returns_none_without_webhook_url(self, monkeypatch):
         monkeypatch.setattr(mn, "N8N_CALENDAR_WEBHOOK_URL", "")
+        monkeypatch.setattr(mn, "N8N_WEBHOOK_SECRET", "s3cr3t")
         assert mn.resolve_calendar_day_type(date(2026, 7, 22)) is None
 
-    def test_returns_none_even_with_webhook_until_implemented(self, monkeypatch):
-        # Hueco preparado pero sin activar -- ver TODO en midnight.py.
-        monkeypatch.setattr(mn, "N8N_CALENDAR_WEBHOOK_URL", "https://n8n.example/webhook/calendar")
+    def test_returns_none_without_secret(self, monkeypatch):
+        monkeypatch.setattr(mn, "N8N_CALENDAR_WEBHOOK_URL", "https://n8n.example/webhook/calendar-events")
+        monkeypatch.setattr(mn, "N8N_WEBHOOK_SECRET", "")
+        assert mn.resolve_calendar_day_type(date(2026, 7, 22)) is None
+
+    def test_returns_none_without_calendars_configured(self, monkeypatch):
+        self._configure(monkeypatch, calendar_ids=[])
+        assert mn.resolve_calendar_day_type(date(2026, 7, 22)) is None
+
+    def test_returns_day_type_from_webhook_response(self, monkeypatch):
+        self._configure(monkeypatch)
+        monkeypatch.setattr(
+            mn.urllib.request, "urlopen",
+            lambda req, timeout=None: _FakeHTTPResponse({"date": "2026-07-22", "day_type": "H", "events": []})
+        )
+        assert mn.resolve_calendar_day_type(date(2026, 7, 22)) == "H"
+
+    def test_sends_secret_header_and_calendar_ids(self, monkeypatch):
+        self._configure(monkeypatch, calendar_ids=["primary", "otro@x.com"])
+        captured = {}
+
+        def fake_urlopen(req, timeout=None):
+            captured["headers"] = req.headers
+            captured["body"] = json.loads(req.data.decode("utf-8"))
+            captured["timeout"] = timeout
+            return _FakeHTTPResponse({"date": "2026-07-22", "day_type": None, "events": []})
+
+        monkeypatch.setattr(mn.urllib.request, "urlopen", fake_urlopen)
+        mn.resolve_calendar_day_type(date(2026, 7, 22))
+
+        assert captured["headers"]["X-webhook-secret"] == "s3cr3t"
+        assert captured["body"] == {"date": "2026-07-22", "calendar_ids": ["primary", "otro@x.com"]}
+        assert captured["timeout"] == mn.CALENDAR_WEBHOOK_TIMEOUT
+
+    def test_returns_none_on_network_error(self, monkeypatch):
+        self._configure(monkeypatch)
+
+        def raise_error(req, timeout=None):
+            raise mn.urllib.error.URLError("boom")
+
+        monkeypatch.setattr(mn.urllib.request, "urlopen", raise_error)
+        assert mn.resolve_calendar_day_type(date(2026, 7, 22)) is None
+
+    def test_returns_none_on_invalid_json_response(self, monkeypatch):
+        self._configure(monkeypatch)
+
+        class _BadResponse(_FakeHTTPResponse):
+            def read(self):
+                return b"not json"
+
+        monkeypatch.setattr(mn.urllib.request, "urlopen", lambda req, timeout=None: _BadResponse({}))
+        assert mn.resolve_calendar_day_type(date(2026, 7, 22)) is None
+
+    def test_returns_none_for_unexpected_day_type_value(self, monkeypatch):
+        self._configure(monkeypatch)
+        monkeypatch.setattr(
+            mn.urllib.request, "urlopen",
+            lambda req, timeout=None: _FakeHTTPResponse({"date": "2026-07-22", "day_type": "X", "events": []})
+        )
         assert mn.resolve_calendar_day_type(date(2026, 7, 22)) is None
 
 

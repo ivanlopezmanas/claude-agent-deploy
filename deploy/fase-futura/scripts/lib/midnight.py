@@ -23,6 +23,8 @@ Connection string en POSTGRES_CONNECTION_STRING (inyectada por EnvironmentFile).
 import json
 import os
 import sys
+import urllib.error
+import urllib.request
 from datetime import datetime, date, timedelta
 
 import psycopg2
@@ -46,27 +48,66 @@ def log(msg: str) -> None:
 
 # --------------------------------------------------------------------------
 # Resolución de day_type: hoy solo ISO weekday. 'H' (festivo) y 'T' (viaje)
-# están reservados en el schema pero nadie los resuelve todavía -- depende
-# de a qué calendario mirar y cómo se marca un festivo/viaje en él, pendiente
-# de definir. El acceso a calendario será vía API HTTP genérica servida por
-# n8n (no MCP, no CalDAV directo -- decisión explícita: el modelo no toca el
-# calendario en crudo, y midnight es determinista, sin invocar al modelo).
+# se resuelven vía API HTTP servida por n8n (no MCP, no CalDAV directo --
+# decisión explícita: el modelo no toca el calendario en crudo, y midnight
+# es determinista, sin invocar al modelo). Qué calendarios consultar sale
+# de calendars.json, no está hardcodeado -- el template es agnóstico de
+# qué cuentas mira cada agente desplegado.
 # --------------------------------------------------------------------------
 N8N_CALENDAR_WEBHOOK_URL = os.environ.get('N8N_CALENDAR_WEBHOOK_URL', '')
+N8N_WEBHOOK_SECRET = os.environ.get('N8N_WEBHOOK_SECRET', '')
+CALENDARS_CONFIG_PATH = '/home/<agent>/workspace/config/calendars.json'
+CALENDAR_WEBHOOK_TIMEOUT = 10
+
+
+def load_calendar_ids() -> list[str]:
+    """Lee calendars.json (calendario/descripción/id por entrada) y devuelve
+    solo los `id`, que es lo único que necesita el webhook de n8n. Fichero
+    ausente o inválido -> [] (agente sin calendario configurado todavía;
+    no debe tumbar el job de medianoche)."""
+    try:
+        with open(CALENDARS_CONFIG_PATH) as f:
+            data = json.load(f)
+        return [c['id'] for c in data.get('calendars', []) if c.get('id')]
+    except Exception:
+        return []
 
 
 def resolve_calendar_day_type(target: date) -> str | None:
     """Devuelve 'H'/'T' si `target` es festivo/viaje según el calendario, o
-    None si no aplica ninguno de los dos (o si el webhook no está configurado
-    todavía). None dice a reconcile_day() que se quede solo con el day_type
-    por ISO weekday -- comportamiento actual, sin cambios, hasta que
-    N8N_CALENDAR_WEBHOOK_URL exista de verdad."""
-    if not N8N_CALENDAR_WEBHOOK_URL:
+    None si no aplica ninguno de los dos (o si el webhook no está configurado,
+    no hay calendarios en calendars.json, o la llamada falla por lo que sea).
+    None dice a reconcile_day() que se quede solo con el day_type por ISO
+    weekday -- fallback seguro: un fallo de red/n8n nunca debe tumbar el job
+    de medianoche, como mucho degrada a "día normal"."""
+    if not N8N_CALENDAR_WEBHOOK_URL or not N8N_WEBHOOK_SECRET:
         return None
-    # TODO: GET a N8N_CALENDAR_WEBHOOK_URL con `target` (ISO date), esperar
-    # {"day_type": "H"|"T"|None}. Sin implementar -- pendiente de que exista
-    # el workflow de n8n y de decidir qué calendario mirar.
-    return None
+    calendar_ids = load_calendar_ids()
+    if not calendar_ids:
+        return None
+
+    body = json.dumps({
+        'date': target.isoformat(),
+        'calendar_ids': calendar_ids,
+    }).encode('utf-8')
+    req = urllib.request.Request(
+        N8N_CALENDAR_WEBHOOK_URL,
+        data=body,
+        method='POST',
+        headers={
+            'Content-Type': 'application/json',
+            'X-Webhook-Secret': N8N_WEBHOOK_SECRET,
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=CALENDAR_WEBHOOK_TIMEOUT) as resp:
+            payload = json.loads(resp.read().decode('utf-8'))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError) as e:
+        log(f"[WARN] resolve_calendar_day_type: fallo llamando a n8n: {e}")
+        return None
+
+    day_type = payload.get('day_type')
+    return day_type if day_type in ('H', 'T') else None
 
 
 # --------------------------------------------------------------------------

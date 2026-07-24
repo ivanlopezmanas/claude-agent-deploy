@@ -1,0 +1,10 @@
+{
+  "_comment": "Plantilla para workspace/config/calendars.json -- copia este fichero (sin el .example), rellena tus calendarios reales y borra este comentario. Cada entrada necesita 'id': el Calendar ID real de Google Calendar (Ajustes del calendario > Integrar calendario > ID de calendario; el calendario principal suele ser tu email o 'primary'). 'calendario' es un nombre lógico corto, 'descripcion' es libre. Nunca metas aquí credenciales ni tokens -- eso vive en n8n y en secrets.env (N8N_WEBHOOK_SECRET).",
+  "calendars": [
+    {
+      "calendario": "personal",
+      "descripcion": "Calendario personal",
+      "id": "tu-email@gmail.com"
+    }
+  ]
+}

@@ -682,6 +682,9 @@ step_15_workspace() {
   push_dir_contents "fase-2/scripts/lib"      "${AH}/workspace/scripts/lib"
   push_dir_contents "fase-futura/scripts/lib" "${AH}/workspace/scripts/lib"
 
+  # config de ejemplo (fase-futura) -- calendars.json.example, lo rellena el onboarding
+  push_dir_contents "fase-futura/config" "${AH}/workspace/config"
+
   # scripts/hooks (fase-1, fase-2)
   push_dir_contents "fase-1/scripts/hooks" "${AH}/workspace/scripts/hooks"
   push_dir_contents "fase-2/scripts/hooks" "${AH}/workspace/scripts/hooks"
@@ -959,8 +962,9 @@ Este es el primer arranque del agente. El CLAUDE.md aún no contiene datos del u
 3. Preguntar el tono deseado: formal/informal, idioma preferido, estilo de respuesta
 4. Una vez recogida la información, actualizar este CLAUDE.md con los datos reales (Edit tool)
 5. Actualizar también ~/workspace/state/instance-identity.json (ya existe, creado por el instalador con agent/vmid/ip/hostname/owner_name) rellenando las claves que hasta ahora estaban vacías: profession, family, tech_level, use_cases, tone_style, language_preference — con el mismo texto que se acaba de escribir en el CLAUDE.md. Este fichero es local y nunca se propaga; es lo que permite reconstruir la forma agnóstica de un fichero si algún día hace falta.
-6. Borrar esta sección \"Primer arranque\" del CLAUDE.md una vez completado el onboarding
-7. Confirmar al usuario que la configuración está guardada
+6. Preguntar si quiere que el agente reconozca festivos/vacaciones/viajes automáticamente (afecta a las notificaciones de midnight). Si dice que sí: por cada calendario de Google Calendar a consultar, pedir nombre lógico corto, descripción, y el Calendar ID real (Ajustes de ese calendario > Integrar calendario > ID de calendario; el calendario principal suele ser el email del propietario o 'primary'). Escribir ~/workspace/config/calendars.json con ese contenido, siguiendo el esquema de calendars.json.example que ya está en esa misma carpeta. Si el propietario no lo tiene a mano ahora o prefiere configurarlo más adelante, saltar este paso sin bloquear el resto — no es obligatorio para que el agente funcione.
+7. Borrar esta sección \"Primer arranque\" del CLAUDE.md una vez completado el onboarding
+8. Confirmar al usuario que la configuración está guardada
 
 El agente NO debe responder preguntas normales hasta completar este flujo de onboarding.
 ONBOARDING"
