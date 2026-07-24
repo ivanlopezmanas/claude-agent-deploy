@@ -9,7 +9,7 @@ inbox de forma atómica y terminar.
 
 - Ha comprobado que había algo elegible en `agent_inbox` (si no, ni siquiera te habría
   lanzado).
-- Ha reclamado esas filas de forma atómica (`UPDATE ... SET claimed_at = now() ... RETURNING`).
+- Ha reclamado esas filas de forma atómica (`UPDATE ... SET status = 'claimed' ... RETURNING`).
   **Tú NO reclamas nada** — no ejecutes ningún `UPDATE`/`SELECT` genérico contra
   `agent_inbox` para "coger trabajo". Las filas que tienes que procesar son EXACTAMENTE
   las que aparecen en el bloque JSON al final de este prompt, identificadas por `id`.
@@ -79,21 +79,29 @@ Para cada fila:
   `Agent(subagent_type='self-improve')` pasándole en el prompt ese `context` bajo un
   encabezado `## Evidencia pre-recopilada` (JSON tal cual), más `OUTPUT_DIR`,
   `TELEGRAM_CHAT_ID` y `LANGUAGE`. El agente `self-improve` es quien sintetiza, escribe el
-  informe y notifica por Telegram — esta sesión de heartbeat solo cierra la fila con
-  `decision = 'delegated'` cuando termine.
+  informe y notifica por Telegram — esta sesión de heartbeat solo cierra la fila
+  (`status = 'processed'`, `decision = 'delegated'`) cuando termine.
 
 ### 3. Cierra el estado de cada fila, por `id`
 
-Para cada fila de la lista, actualiza `processed_at = now()` y un `decision` coherente con
+Para cada fila de la lista, actualiza `status` y un `decision` coherentes con
 `chk_terminal_state`, dirigiendo el UPDATE por `id` (`WHERE id = '<uuid>'`) — nunca un
-UPDATE genérico que pudiera tocar filas que no están en tu lista:
+UPDATE genérico que pudiera tocar filas que no están en tu lista. `status` solo tiene dos
+movimientos posibles desde aquí:
 
-- Enviado al usuario → `decision = 'sent'`.
-- Acumulado para el briefing → `decision = 'queued_briefing'` (deja `processed_at` NULL).
-- Enviado dentro de un briefing → `decision = 'sent_in_briefing'`.
-- Aplazado → `decision = 'deferred'` (deja `processed_at` NULL, ajusta `process_after`).
-- Delegado a otro agente → `decision = 'delegated'` (deja `processed_at` NULL).
-- Descartado → `decision = 'dropped'`.
+- **`status = 'processed'`** (tu trabajo con esta fila termina aquí, aunque el payload lo
+  siga usando después otro proceso) para:
+  - Enviado al usuario → `decision = 'sent'`.
+  - Acumulado para el briefing → `decision = 'queued_briefing'`.
+  - Enviado dentro de un briefing → `decision = 'sent_in_briefing'`.
+  - Delegado a otro agente → `decision = 'delegated'`.
+  - Descartado → `decision = 'dropped'`.
+- **`status = NULL`** (vuelve a quedar reclamable, un heartbeat futuro la reconsiderará en
+  cuanto llegue `process_after`) solo para:
+  - Aplazado → `decision = 'deferred'`, ajusta `process_after` al momento en que toca
+    reconsiderarla. Es el ÚNICO caso que no cierra `status`.
+
+Ejemplo: `UPDATE agent_inbox SET status = 'processed', status_at = now(), decision = 'sent' WHERE id = '<uuid>'`.
 
 ### 4. Notificaciones urgentes (solo `severity = 'critical'`)
 

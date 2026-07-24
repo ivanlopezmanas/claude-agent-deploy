@@ -30,6 +30,24 @@ existen todavía, así que por ahora este es el único nivel de tiering) y
 contador de `attempts` en `agent_inbox` para cortar scripts que fallan
 repetidamente (mensaje envenenado) en vez de reintentar para siempre.
 
+Commit 4: `claimed_at`/`processed_at` sustituidos por un único campo
+`status` (NULL=no reclamada, 'claimed'=reclamada, 'processed'=terminada)
+más `status_at` (cuándo cambió por última vez). Con `heartbeat.service`
+`Type=oneshot` y `heartbeat.timer` `OnUnitInactiveSec=5min`, systemd nunca
+arranca una ejecución nueva mientras la anterior sigue activa (y
+`TimeoutStartSec=4min` acota el caso colgado) -- así que cualquier fila que
+siga en `status='claimed'` al empezar una ejecución nueva es, por
+construcción, huérfana de una ejecución anterior ya muerta. `CLAIM_QUERY`
+reclama en la misma condición lo nuevo (`status IS NULL`) y lo huérfano
+(`status='claimed'`): ya no hace falta timeout de visibilidad explícito. De
+paso corrige un bug real: al no resetear nunca `claimed_at`, una fila
+`deferred` quedaba "reclamada" para siempre y no se reintentaba aunque
+`process_after` ya hubiera llegado -- ahora `deferred` es el único caso que
+vuelve a `status=NULL` (ver `heartbeat.md`); el resto de decisiones
+(incluidas `queued_briefing`/`delegated`) cierran la parte de heartbeat con
+`status='processed'`, aunque el payload lo consuma después otro proceso
+localizándolo por `decision`.
+
 Script standalone con psycopg2, sin dependencias externas adicionales.
 Connection string en POSTGRES_CONNECTION_STRING (inyectada por EnvironmentFile).
 """
@@ -54,9 +72,8 @@ MAX_SCRIPT_ATTEMPTS = 5  # a partir de aquí, un script de 'task' que no resuelv
 
 CLAIM_QUERY = """
     UPDATE agent_inbox
-       SET claimed_at = now()
-     WHERE claimed_at IS NULL
-       AND processed_at IS NULL
+       SET status = 'claimed', status_at = now()
+     WHERE status IS DISTINCT FROM 'processed'
        AND process_after <= now()
     RETURNING id, source, event_type, payload, severity, agent, dedupe_key,
               scheduled_task_id, target_task_id, created_at, process_after, attempts
@@ -148,7 +165,7 @@ def run_task_script(row: dict) -> dict:
 
 def close_row(cur, row_id, decision: str) -> None:
     cur.execute(
-        "UPDATE agent_inbox SET processed_at = now(), decision = %s WHERE id = %s",
+        "UPDATE agent_inbox SET status = 'processed', status_at = now(), decision = %s WHERE id = %s",
         (decision, row_id),
     )
 

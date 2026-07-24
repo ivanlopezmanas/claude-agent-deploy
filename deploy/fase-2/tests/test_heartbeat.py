@@ -83,7 +83,7 @@ class TestClaimPending:
         query = cur.queries[0][0]
         assert "UPDATE agent_inbox" in query
         assert "RETURNING" in query
-        assert "claimed_at = now()" in query
+        assert "status = 'claimed'" in query
         assert "attempts" in query
 
 
@@ -286,7 +286,7 @@ class TestClassifyAndDispatch:
                 # Se agota el margen: se cierra sin llegar al modelo.
                 assert needs_model == []
                 close_query = cur.queries[-1]
-                assert "processed_at = now()" in close_query[0]
+                assert "status = 'processed'" in close_query[0]
                 assert close_query[1] == ("dropped", row_id)
 
     def test_non_deterministic_row_passes_through_untouched(self):

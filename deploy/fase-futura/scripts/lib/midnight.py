@@ -180,7 +180,7 @@ def enqueue_scheduled_task(cur, target: date, r: dict) -> bool:
     source = f"scheduled_task:{r['task_name']}"
     cur.execute(
         "SELECT 1 FROM agent_inbox "
-        "WHERE source = %s AND processed_at IS NULL AND process_after >= now() "
+        "WHERE source = %s AND status IS DISTINCT FROM 'processed' AND process_after >= now() "
         "LIMIT 1",
         (source,)
     )

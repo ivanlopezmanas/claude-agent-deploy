@@ -146,30 +146,38 @@ CREATE TABLE agent_inbox (
   target_task_id    INT REFERENCES scheduled_task(id), -- routing: item derivado que solo puede recoger este monitor/briefing
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   process_after     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  claimed_at        TIMESTAMPTZ,                         -- reserva atómica: el heartbeat lo rellena al reclamar
-  processed_at      TIMESTAMPTZ,
+  status            TEXT                                  -- NULL=no reclamada, 'claimed'=reclamada (huérfana si no hay
+                      CHECK (status IS NULL OR status IN   -- heartbeat corriendo), 'processed'=terminada. Único campo de
+                        ('claimed', 'processed')),         -- estado: sustituye a claimed_at/processed_at.
+  status_at         TIMESTAMPTZ,                           -- cuándo cambió `status` por última vez
   decision          TEXT
                       CHECK (decision IS NULL OR decision IN
                         ('sent','sent_in_briefing','queued_briefing',
                          'deferred','delegated','dropped')),
   attempts          INT NOT NULL DEFAULT 0,               -- scripts de 'task' que no resuelven; heartbeat.py corta en MAX_SCRIPT_ATTEMPTS
 
+  -- 'deferred' es el único caso que vuelve a status=NULL (se reconsidera solo
+  -- cuando llegue el nuevo process_after); el resto de decisiones, incluidas
+  -- 'queued_briefing'/'delegated', cierran la parte de heartbeat (status=
+  -- 'processed') aunque el payload lo siga usando después otro proceso
+  -- (compositor de briefing, agente delegado) -- ese consumo futuro se
+  -- localiza por `decision`, no reabriendo la fila vía status.
   CONSTRAINT chk_terminal_state CHECK (
-    (processed_at IS NULL
-       AND (decision IS NULL OR decision IN ('queued_briefing','deferred','delegated')))
+    (status IS DISTINCT FROM 'processed'
+       AND (decision IS NULL OR decision = 'deferred'))
     OR
-    (processed_at IS NOT NULL
-       AND decision IN ('sent','sent_in_briefing','dropped'))
+    (status = 'processed'
+       AND decision IN ('sent','sent_in_briefing','queued_briefing','delegated','dropped'))
   )
 );
 
 CREATE INDEX inbox_pending
   ON agent_inbox (process_after)
-  WHERE processed_at IS NULL;
+  WHERE status IS DISTINCT FROM 'processed';
 
 CREATE UNIQUE INDEX inbox_dedupe
   ON agent_inbox (source, event_type, dedupe_key)
-  WHERE processed_at IS NULL AND dedupe_key IS NOT NULL;
+  WHERE status IS DISTINCT FROM 'processed' AND dedupe_key IS NOT NULL;
 
 -- Filas iniciales de mantenimiento (kind='core'). Solo se siembra aquí lo que
 -- ya cumple el contrato de salida de heartbeat.py ({"ok","notify"} por
