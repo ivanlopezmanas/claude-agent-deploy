@@ -20,10 +20,15 @@ explícito: el modelo deja de hacer su propio UPDATE...RETURNING genérico
 (evita la carrera de reclamación Python-vs-modelo).
 
 Commit 2 de la migración. Deliberadamente fuera de alcance todavía (ver
-informe de diseño): plantillas para `reminder`/`alert` con `payload.text`,
-un `notify()` centralizado con candado atómico sobre `daily_schedule`,
-tiering de modelo (Haiku para redacción pura), y manejo de reintentos con
-un contador de `attempts` para scripts que fallan repetidamente.
+informe de diseño), aparcado para la instancia real ya instalada, no para
+este template: plantillas para `reminder`/`alert` con `payload.text`, y un
+`notify()` centralizado con candado atómico sobre `daily_schedule`.
+
+Commit 3: tiering de modelo (toda invocación de `claude --print` desde aquí
+usa Haiku, no solo redacción pura -- las plantillas del punto anterior no
+existen todavía, así que por ahora este es el único nivel de tiering) y
+contador de `attempts` en `agent_inbox` para cortar scripts que fallan
+repetidamente (mensaje envenenado) en vez de reintentar para siempre.
 
 Script standalone con psycopg2, sin dependencias externas adicionales.
 Connection string en POSTGRES_CONNECTION_STRING (inyectada por EnvironmentFile).
@@ -44,6 +49,8 @@ CLAUDE_BIN = '/home/<agent>/claude/.local/bin/claude'
 PROMPT_FILE = '/home/<agent>/workspace/scripts/lib/prompts/heartbeat.md'
 MODEL_TIMEOUT_SECONDS = 220  # por debajo de TimeoutStartSec=4min del .service
 SCRIPT_TIMEOUT_SECONDS = 60
+CLAUDE_MODEL = 'haiku'  # todas las sesiones de heartbeat son de proceso de cola, no conversación
+MAX_SCRIPT_ATTEMPTS = 5  # a partir de aquí, un script de 'task' que no resuelve se descarta sin pasar por el modelo
 
 CLAIM_QUERY = """
     UPDATE agent_inbox
@@ -52,7 +59,7 @@ CLAIM_QUERY = """
        AND processed_at IS NULL
        AND process_after <= now()
     RETURNING id, source, event_type, payload, severity, agent, dedupe_key,
-              scheduled_task_id, target_task_id, created_at, process_after
+              scheduled_task_id, target_task_id, created_at, process_after, attempts
 """
 
 
@@ -146,6 +153,15 @@ def close_row(cur, row_id, decision: str) -> None:
     )
 
 
+def bump_attempts(cur, row_id) -> int:
+    """Incrementa attempts de forma atómica y devuelve el contador ya actualizado."""
+    cur.execute(
+        "UPDATE agent_inbox SET attempts = attempts + 1 WHERE id = %s RETURNING attempts",
+        (row_id,),
+    )
+    return cur.fetchone()['attempts']
+
+
 def is_task_with_script(row: dict) -> bool:
     payload = row.get('payload')
     return (row.get('event_type') == 'task'
@@ -169,9 +185,19 @@ def classify_and_dispatch(cur, rows: list) -> list:
                 close_row(cur, row['id'], 'dropped')
                 log(f"[TASK] '{row['source']}' resuelta por script, sin modelo")
                 continue
+
+            attempts = bump_attempts(cur, row['id'])
+            if attempts >= MAX_SCRIPT_ATTEMPTS:
+                close_row(cur, row['id'], 'dropped')
+                log(f"[TASK] '{row['source']}' descartada tras {attempts} intentos fallidos "
+                    f"({outcome['error'] or 'sin detalle'}) -- mensaje envenenado, no pasa al modelo")
+                continue
+
             row['_script_outcome'] = outcome
+            row['_attempts'] = attempts
             log(f"[TASK] '{row['source']}' no resuelta por script "
-                f"({outcome['error'] or 'algo que reportar'}), pasa al modelo")
+                f"(intento {attempts}/{MAX_SCRIPT_ATTEMPTS}, "
+                f"{outcome['error'] or 'algo que reportar'}), pasa al modelo")
         needs_model.append(row)
     return needs_model
 
@@ -200,7 +226,7 @@ def run_model(rows: list) -> int:
     prompt_text = build_model_prompt(rows)
     try:
         result = subprocess.run(
-            [CLAUDE_BIN, '--print', '--strict-mcp-config'],
+            [CLAUDE_BIN, '--print', '--strict-mcp-config', '--model', CLAUDE_MODEL],
             input=prompt_text, capture_output=True, timeout=MODEL_TIMEOUT_SECONDS, text=True,
         )
     except subprocess.TimeoutExpired:

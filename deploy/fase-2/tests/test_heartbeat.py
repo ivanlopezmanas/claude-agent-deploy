@@ -25,12 +25,20 @@ class _FakeCursor:
     def __init__(self, fetchall_result=None):
         self._fetchall_result = fetchall_result or []
         self.queries = []
+        self._attempts = {}
 
     def execute(self, query, params=None):
         self.queries.append((query, params))
+        if "attempts = attempts + 1" in query:
+            row_id = params[0]
+            self._attempts[row_id] = self._attempts.get(row_id, 0) + 1
 
     def fetchall(self):
         return self._fetchall_result
+
+    def fetchone(self):
+        row_id = self.queries[-1][1][0]
+        return {"attempts": self._attempts[row_id]}
 
     def __enter__(self):
         return self
@@ -76,6 +84,7 @@ class TestClaimPending:
         assert "UPDATE agent_inbox" in query
         assert "RETURNING" in query
         assert "claimed_at = now()" in query
+        assert "attempts" in query
 
 
 # ----------------------------------------------------------------- resolve_script_path()
@@ -243,8 +252,11 @@ class TestClassifyAndDispatch:
 
         assert len(needs_model) == 1
         assert needs_model[0]["_script_outcome"]["ok"] is False
+        assert needs_model[0]["_attempts"] == 1
         # No se cierra en Python -- el modelo decide con el motivo del fallo.
-        assert cur.queries == []
+        # Sí se contabiliza el intento fallido (bump_attempts), nada más.
+        assert len(cur.queries) == 1
+        assert "attempts = attempts + 1" in cur.queries[0][0]
 
     def test_contract_violation_goes_to_model_with_outcome_attached(self, monkeypatch):
         monkeypatch.setattr(hb.subprocess, "run",
@@ -256,7 +268,26 @@ class TestClassifyAndDispatch:
 
         assert len(needs_model) == 1
         assert needs_model[0]["_script_outcome"]["ok"] is None
-        assert cur.queries == []
+        assert needs_model[0]["_attempts"] == 1
+        assert len(cur.queries) == 1
+
+    def test_script_dropped_after_max_attempts_without_reaching_model(self, monkeypatch):
+        stdout = _contract_stdout(False, {"severity": "low", "message": None, "context": "disco lleno"})
+        monkeypatch.setattr(hb.subprocess, "run", lambda *a, **k: _FakeCompleted(0, stdout))
+        cur = _FakeCursor()
+        row_id = "t1"
+
+        for attempt in range(1, hb.MAX_SCRIPT_ATTEMPTS + 1):
+            rows = [_row(row_id, event_type="task", payload={"script_path": "/x.py"})]
+            needs_model = hb.classify_and_dispatch(cur, rows)
+            if attempt < hb.MAX_SCRIPT_ATTEMPTS:
+                assert needs_model[0]["_attempts"] == attempt
+            else:
+                # Se agota el margen: se cierra sin llegar al modelo.
+                assert needs_model == []
+                close_query = cur.queries[-1]
+                assert "processed_at = now()" in close_query[0]
+                assert close_query[1] == ("dropped", row_id)
 
     def test_non_deterministic_row_passes_through_untouched(self):
         cur = _FakeCursor()
@@ -325,8 +356,14 @@ class TestRunModel:
         result = hb.run_model([_row("a1")])
 
         assert result == 0
-        assert captured["cmd"] == [hb.CLAUDE_BIN, "--print", "--strict-mcp-config"]
+        assert captured["cmd"] == [hb.CLAUDE_BIN, "--print", "--strict-mcp-config",
+                                    "--model", hb.CLAUDE_MODEL]
         assert "base" in captured["input"]
+
+    def test_uses_haiku_model_for_all_heartbeat_sessions(self):
+        # Sesiones de heartbeat son procesado de cola, no conversación --
+        # no hace falta el modelo caro por defecto.
+        assert hb.CLAUDE_MODEL == "haiku"
 
     def test_model_failure_propagates_returncode(self, monkeypatch, tmp_path):
         prompt_file = tmp_path / "heartbeat.md"

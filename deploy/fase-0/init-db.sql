@@ -152,6 +152,7 @@ CREATE TABLE agent_inbox (
                       CHECK (decision IS NULL OR decision IN
                         ('sent','sent_in_briefing','queued_briefing',
                          'deferred','delegated','dropped')),
+  attempts          INT NOT NULL DEFAULT 0,               -- scripts de 'task' que no resuelven; heartbeat.py corta en MAX_SCRIPT_ATTEMPTS
 
   CONSTRAINT chk_terminal_state CHECK (
     (processed_at IS NULL
