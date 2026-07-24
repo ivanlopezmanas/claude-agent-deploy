@@ -176,6 +176,7 @@ ask TELEGRAM_CHAT_ID  "Chat ID del propietario"         ""
 ask OWNER_NAME        "Nombre del propietario (para la BD)"  ""
 ask_secret GITHUB_TOKEN    "Token de GitHub para que el agente pueda propagar mejoras al template vía PR (oculto; fase 2 de claude-agent-deploy)"
 ask GITHUB_USERNAME   "Usuario de GitHub asociado a ese token (para el email de commit del agente)" ""
+ask_secret N8N_WEBHOOK_SECRET "Secreto compartido (Header Auth) para toda llamada del agente a webhooks de n8n (oculto; fase-futura, calendario)"
 read -rp "Clave pública SSH del propietario (opcional, ENTER para omitir): " OWNER_SSH_KEY
 ask DEPLOY_SRC        "Directorio con los templates"    "${SCRIPT_DIR}"
 ask PROXMOX_TEMPLATE  "Template LXC"                    "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
@@ -218,6 +219,7 @@ cat <<EOF
   Bot token         : (oculto, ${#TELEGRAM_BOT_TOKEN} caracteres)
   GitHub token      : (oculto, ${#GITHUB_TOKEN} caracteres)
   GitHub username   : ${GITHUB_USERNAME}
+  n8n webhook secret: (oculto, ${#N8N_WEBHOOK_SECRET} caracteres)
   Templates (src)   : ${DEPLOY_SRC}
   Template LXC      : ${PROXMOX_TEMPLATE}
 EOF
@@ -537,12 +539,13 @@ TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
 POSTGRES_CONNECTION_STRING=postgresql://${AGENT_NAME}:${PG_PASSWORD}@localhost:5432/agents
 GITHUB_TOKEN=${GITHUB_TOKEN}
 GITHUB_USERNAME=${GITHUB_USERNAME}
+N8N_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET}
 EOF
   pct push "${VMID}" "${tmp_secrets}" "/etc/${AGENT_NAME}/secrets.env" --perms 640
   lxc_exec "chown root:${AGENT_NAME} /etc/${AGENT_NAME}/secrets.env"
   rm -f "${tmp_secrets}"
   # Verificar (sin imprimir el contenido): solo que las claves obligatorias están
-  lxc_exec "grep -q '^TELEGRAM_BOT_TOKEN=' /etc/${AGENT_NAME}/secrets.env && grep -q '^POSTGRES_CONNECTION_STRING=' /etc/${AGENT_NAME}/secrets.env && grep -q '^GITHUB_TOKEN=' /etc/${AGENT_NAME}/secrets.env"
+  lxc_exec "grep -q '^TELEGRAM_BOT_TOKEN=' /etc/${AGENT_NAME}/secrets.env && grep -q '^POSTGRES_CONNECTION_STRING=' /etc/${AGENT_NAME}/secrets.env && grep -q '^GITHUB_TOKEN=' /etc/${AGENT_NAME}/secrets.env && grep -q '^N8N_WEBHOOK_SECRET=' /etc/${AGENT_NAME}/secrets.env"
 }
 
 run_step STEP_11 "Crear /etc/${AGENT_NAME}/secrets.env"        step_11_secrets_file
