@@ -76,7 +76,7 @@ class TestAgentPermissionsTable:
         rc, out, _ = run_hook(SCRIPT, {
             "tool_name": "WebSearch",
             "tool_input": {"query": "x"},
-            "agent_type": "seeker-scout",
+            "agent_type": "the-seeker-scout",
         })
         assert _decision(out) == "allow"
 
@@ -84,7 +84,7 @@ class TestAgentPermissionsTable:
         rc, out, _ = run_hook(SCRIPT, {
             "tool_name": "Bash",
             "tool_input": {"command": "ls"},
-            "agent_type": "seeker-scout",
+            "agent_type": "the-seeker-scout",
         })
         assert _decision(out) == "deny"
 
