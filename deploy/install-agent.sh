@@ -300,7 +300,11 @@ run_step STEP_05 "Instalar dependencias del sistema"         step_05_deps
 # =============================================================================
 
 step_06_user_dirs() {
-  lxc_exec "id ${AGENT_NAME} >/dev/null 2>&1 || useradd -m -s /usr/sbin/nologin -u 1000 ${AGENT_NAME}"
+  # Grupo explícito en vez de confiar en el USERGROUPS_ENAB por defecto de la
+  # plantilla: STEP_11/12 dependen de que el grupo ${AGENT_NAME} exista y de
+  # que el usuario pertenezca a él (chown root:${AGENT_NAME} sobre secrets.env).
+  lxc_exec "groupadd -f ${AGENT_NAME}"
+  lxc_exec "id ${AGENT_NAME} >/dev/null 2>&1 || useradd -m -s /usr/sbin/nologin -u 1000 -g ${AGENT_NAME} ${AGENT_NAME}"
   lxc_exec "mkdir -p /home/${AGENT_NAME}/{claude,workspace/{docs/{improvements,incidentes,planes,tareas},tests,scripts/{hooks,lib}},apps/{bin,lib,share},data/{postgresql,cache},logs,tmp}"
   lxc_exec "chown -R ${AGENT_NAME}:${AGENT_NAME} /home/${AGENT_NAME}"
 }
@@ -546,6 +550,12 @@ EOF
   rm -f "${tmp_secrets}"
   # Verificar (sin imprimir el contenido): solo que las claves obligatorias están
   lxc_exec "grep -q '^TELEGRAM_BOT_TOKEN=' /etc/${AGENT_NAME}/secrets.env && grep -q '^POSTGRES_CONNECTION_STRING=' /etc/${AGENT_NAME}/secrets.env && grep -q '^GITHUB_TOKEN=' /etc/${AGENT_NAME}/secrets.env && grep -q '^N8N_WEBHOOK_SECRET=' /etc/${AGENT_NAME}/secrets.env"
+  # Fail-fast: confirmar aquí mismo que ${AGENT_NAME} puede leer el fichero
+  # (grupo/permisos correctos) en vez de descubrirlo 15 pasos después en STEP_27.
+  if ! lxc_exec "su -s /bin/bash ${AGENT_NAME} -c 'test -r /etc/${AGENT_NAME}/secrets.env'"; then
+    log_fail "El usuario ${AGENT_NAME} no puede leer /etc/${AGENT_NAME}/secrets.env. Revisa grupo/permisos (STEP_06, STEP_11)."
+    return 1
+  fi
 }
 
 run_step STEP_11 "Crear /etc/${AGENT_NAME}/secrets.env"        step_11_secrets_file
@@ -910,7 +920,7 @@ step_27_final_checks() {
 
   echo ""
   log_info "[postgres] Conteo de agent_memory (criterio duro — debe responder sin error):"
-  if lxc_exec "su -s /bin/bash ${AGENT_NAME} -c 'set -a; . /etc/${AGENT_NAME}/secrets.env; set +a; psql \"\$POSTGRES_CONNECTION_STRING\" -tAc \"SELECT COUNT(*) FROM agent_memory;\"'"; then
+  if lxc_exec "su -s /bin/bash ${AGENT_NAME} -c 'cd /home/${AGENT_NAME} && set -a; . /etc/${AGENT_NAME}/secrets.env; set +a; psql \"\$POSTGRES_CONNECTION_STRING\" -tAc \"SELECT COUNT(*) FROM agent_memory;\"'"; then
     log_ok "agent_memory accesible con el usuario ${AGENT_NAME}."
   else
     log_fail "No se puede consultar agent_memory. Verifica: connection string en secrets.env, RLS, usuario ${AGENT_NAME} en la BD."
