@@ -316,11 +316,13 @@ step_06b_passwords() {
   # `su`/uso local, no habilita SSH directo como ese usuario — el acceso SSH sigue
   # siendo solo como root.
   local tmp_passwd="/tmp/passwd-${AGENT_NAME}-${VMID}.txt"
+  local old_umask; old_umask=$(umask)
   umask 077
   cat > "${tmp_passwd}" <<EOF
 root:${ROOT_PASSWORD}
 ${AGENT_NAME}:${AGENT_PASSWORD}
 EOF
+  umask "${old_umask}"
   pct push "${VMID}" "${tmp_passwd}" /tmp/passwd.txt --perms 600
   rm -f "${tmp_passwd}"
   lxc_exec "chpasswd < /tmp/passwd.txt && rm -f /tmp/passwd.txt"
@@ -527,6 +529,10 @@ run_step STEP_10 "OAuth interactivo de Claude Code (manual)"   step_10_oauth
 
 step_11_secrets_file() {
   lxc_exec "mkdir -p /etc/${AGENT_NAME}"
+  # Explícito: no depender del umask ambiente del proceso instalador (STEP_06B
+  # dos pasos antes deja umask 077 puesto, lo que daría 700 en vez de 755 y
+  # bloquearía a ${AGENT_NAME} el acceso incluso con el fichero bien permisado).
+  lxc_exec "chmod 755 /etc/${AGENT_NAME}"
   lxc_exec "touch /etc/${AGENT_NAME}/secrets.env"
   lxc_exec "chmod 640 /etc/${AGENT_NAME}/secrets.env"
   lxc_exec "chown root:${AGENT_NAME} /etc/${AGENT_NAME}/secrets.env"
@@ -536,6 +542,7 @@ step_12_secrets_fill() {
   # Escribir secrets.env SIN que los secretos pasen por stdout/argv visibles.
   # Generamos el fichero localmente con heredoc y lo empujamos con pct push.
   local tmp_secrets="/tmp/secrets-${AGENT_NAME}-${VMID}.env"
+  local old_umask; old_umask=$(umask)
   umask 077
   cat > "${tmp_secrets}" <<EOF
 TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
@@ -545,6 +552,7 @@ GITHUB_TOKEN=${GITHUB_TOKEN}
 GITHUB_USERNAME=${GITHUB_USERNAME}
 N8N_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET}
 EOF
+  umask "${old_umask}"
   pct push "${VMID}" "${tmp_secrets}" "/etc/${AGENT_NAME}/secrets.env" --perms 640
   lxc_exec "chown root:${AGENT_NAME} /etc/${AGENT_NAME}/secrets.env"
   rm -f "${tmp_secrets}"
@@ -743,6 +751,7 @@ step_15b_instance_identity() {
   local AH="/home/${AGENT_NAME}"
   local tmp_identity="/tmp/instance-identity-${AGENT_NAME}-${VMID}.json"
   local IP_ADDRESS_BARE="${IP_ADDRESS%%/*}"  # sin máscara CIDR, como aparece en el texto renderizado
+  local old_umask; old_umask=$(umask)
   umask 077
   AGENT_NAME="${AGENT_NAME}" AGENT_UPPER="${AGENT_UPPER}" AGENT_TITLE="${AGENT_TITLE}" \
   VMID="${VMID}" IP_ADDRESS="${IP_ADDRESS_BARE}" LXC_HOSTNAME="${LXC_HOSTNAME}" OWNER_NAME="${OWNER_NAME}" \
@@ -770,6 +779,7 @@ with open(sys.argv[1], "w") as f:
     json.dump(data, f, indent=2, ensure_ascii=False)
     f.write("\n")
 PYEOF
+  umask "${old_umask}"
   lxc_exec "mkdir -p ${AH}/workspace/state"
   pct push "${VMID}" "${tmp_identity}" "${AH}/workspace/state/instance-identity.json" --perms 600
   lxc_exec "chown ${AGENT_NAME}:${AGENT_NAME} ${AH}/workspace/state/instance-identity.json"
