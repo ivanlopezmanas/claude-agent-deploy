@@ -2,7 +2,10 @@
 # chmod +x /home/<agent>/workspace/scripts/hooks/sessionstart-hook.py
 """sessionstart-hook.py — SessionStart (feedback).
 
-No bloquea. FAIL-OPEN. Parte que pertenece al §4 (harness):
+No bloquea. FAIL-OPEN. Solo actúa en contexto main (evita que una sesión
+aislada de call_isolated_agent — p.ej. el propio saludo de Haiku — dispare
+su propio SessionStart y encadene otro saludo indefinidamente). Parte que
+pertenece al §4 (harness):
   1. Detecta primer arranque (ONBOARDING_PENDING en CLAUDE.md) e inyecta contexto.
   2. Registra el inicio de sesión en el log de permisos.
   3. Limpia ficheros-bandera huérfanos de /tmp/<agent>-* de sesiones anteriores
@@ -58,10 +61,15 @@ if os.environ.get("CLAUDECODE") and CLAUDE_MD.exists():
         pass
 
 sys.path.insert(0, "/home/<agent>/workspace/scripts/lib")
-from common import (read_hook_input, log_permission,
+from common import (read_hook_input, log_permission, is_main_context,
                         TELEGRAM_TURN_FLAG, REWAKE_COUNTER, APPROVAL_PENDING)
 
 ORPHAN_FLAGS = (TELEGRAM_TURN_FLAG, REWAKE_COUNTER, APPROVAL_PENDING)
+
+# Solo contexto main: una sesión aislada (p.ej. el propio saludo de greeting.py
+# vía call_isolated_agent) no debe volver a lanzar otro saludo al arrancar.
+if not is_main_context():
+    sys.exit(0)
 
 try:
     data = read_hook_input()
