@@ -53,17 +53,10 @@
     ]
   },
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/home/<agent>/workspace/scripts/hooks/pretooluse-hook.py"
-          }
-        ]
-      }
-    ],
+    "SessionStart": [],
+    "UserPromptSubmit": [],
+    "PreToolUse": [],
+    "PostToolUse": [],
     "Stop": [
       {
         "hooks": [
@@ -73,6 +66,9 @@
           }
         ]
       }
-    ]
+    ],
+    "Notification": [],
+    "PreCompact": [],
+    "SessionEnd": []
   }
 }
