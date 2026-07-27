@@ -168,14 +168,28 @@ def call_isolated_agent(prompt: str, *, agent: str = None, model: str = None,
                          mcp_config: str = None, allowed_tools: list = None,
                          max_turns: int = None, output_format: str = None,
                          timeout: int = 60) -> str:
-    """Lanza `claude --print` completamente aislado del canal principal.
+    """Lanza `claude --print` desde un hook o script, con permisos reforzados.
 
     Único punto de entrada permitido para invocar Claude desde un hook o script
-    (regla inviolable del kernel). Combina los tres mecanismos de §7.2:
-    --strict-mcp-config (cierra todos los MCP del usuario, incluido Telegram),
-    --settings settings-background.json (sin hooks Session*/Notification/
-    PostToolUse — no hay bucle posible aunque el sub-proceso abra su propia
-    sesión) y <AGENT>_CONTEXT=subagent como señal explícita adicional.
+    (regla inviolable del kernel). Combina tres mecanismos de §7.2 — pero ojo,
+    NO son un aislamiento real de hooks, solo de MCP y de permisos:
+
+    - --strict-mcp-config: cierra todos los MCP del usuario, incluido Telegram.
+      Este sí aísla de verdad.
+    - --settings settings-background.json: SE FUSIONA con el settings.json
+      principal, no lo sustituye (comprobado empíricamente, incluso con
+      arrays vacíos explícitos por hook). Su "allow" es decorativo — cualquier
+      cosa que permita el settings.json principal se hereda igual. Lo único
+      que aporta de verdad es su "deny" extra (secrets, .ssh, .env, claves —
+      gana siempre sobre cualquier allow). Los hooks declarados aquí (o
+      ausentes) NO cortan los del principal: el sub-proceso dispara igual
+      SessionStart/Stop/etc. del settings.json principal si este los tiene.
+    - <AGENT>_CONTEXT=subagent: única señal real de aislamiento de hooks.
+      Cada hook tiene que comprobarla explícitamente vía is_main_context()
+      (ver common.py) para no reaccionar dentro de esta llamada — si un hook
+      nuevo se olvida de esa guarda, un sub-proceso que abra su propia sesión
+      puede volver a disparar ese hook y encadenar una llamada tras otra sin
+      límite (pasó de verdad con sessionstart-hook.py y el saludo de Haiku).
 
     - agent: nombre del agente configurado a usar (trae su propio modelo/
       allowlist/prompt, ej. "the-chronicler").
