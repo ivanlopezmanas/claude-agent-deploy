@@ -11,6 +11,8 @@
   "rules": [
     { "match": "etc/<agent>/secrets.env", "classification": "never" },
     { "match": "workspace/state/", "classification": "never" },
+    { "match": "claude/.claude/agents/", "classification": "propagable", "repo_dir": "deploy/fase-2/agents/" },
+    { "match": "claude/.claude/skills/", "classification": "propagable", "repo_dir": "deploy/fase-2/skills/" },
     { "match": "claude/.claude/", "classification": "never" },
     { "match": "claude/.claude.json", "classification": "never" },
     { "match": ".ssh/", "classification": "never" },
@@ -54,8 +56,6 @@
 
     { "match": "workspace/scripts/lib/", "classification": "propagable", "repo_dir": "deploy/fase-futura/scripts/lib/", "note": "fallback para scripts nuevos sin entrada explícita arriba -- fase-futura es donde aterrizan las librerías más recientes" },
     { "match": "workspace/scripts/hooks/", "classification": "propagable", "repo_dir": "deploy/fase-1/scripts/hooks/" },
-    { "match": "workspace/tests/", "classification": "propagable", "repo_dir": "deploy/fase-2/tests/" },
-    { "match": "claude/.claude/agents/", "classification": "propagable", "repo_dir": "deploy/fase-2/agents/" },
-    { "match": "claude/.claude/skills/", "classification": "propagable", "repo_dir": "deploy/fase-2/skills/" }
+    { "match": "workspace/tests/", "classification": "propagable", "repo_dir": "deploy/fase-2/tests/" }
   ]
 }
