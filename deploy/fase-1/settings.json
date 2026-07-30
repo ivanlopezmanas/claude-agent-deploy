@@ -29,6 +29,7 @@
       "mcp__postgres__get_schema"
     ],
     "deny": [
+      "AskUserQuestion",
       "Read(/home/<agent>/.ssh/**)",
       "Read(**/.env)",
       "Read(**/.env.*)",
