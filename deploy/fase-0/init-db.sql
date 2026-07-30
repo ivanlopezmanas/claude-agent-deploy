@@ -187,8 +187,6 @@ CREATE UNIQUE INDEX inbox_dedupe
 INSERT INTO scheduled_task (name, label, kind, script_path, severity) VALUES
   ('template-sync', 'Pull diario de ~/template/ desde claude-agent-deploy (fase 1: solo lectura)',
    'core', 'workspace/scripts/lib/template_sync.py', 'low'),
-  ('autoreset', 'Reinicio nocturno automático si el servicio lleva >1h idle',
-   'core', 'workspace/scripts/lib/autoreset.py', 'low'),
   ('self-improve', 'Auditoría semanal de automejora: recopila evidencia mecánica y delega la síntesis en el agente self-improve',
    'core', 'workspace/scripts/lib/self_improve.py', 'low')
 ON CONFLICT (name) DO NOTHING;
@@ -239,12 +237,11 @@ CREATE UNIQUE INDEX schedule_config_task_unique
   ON schedule_config (day_type, scheduled_task_id)
   WHERE kind = 'task' AND scheduled_task_id IS NOT NULL;
 
--- Horario de las 3 tareas 'core' sembradas arriba. Diarias -> day_type='*';
+-- Horario de las 2 tareas 'core' sembradas arriba. Diarias -> day_type='*';
 -- self-improve es semanal (lunes) -> day_type='1' (ver ISO_TO_DAYTYPE en
 -- midnight.py: '1'..'7' = lunes..domingo).
 INSERT INTO schedule_config (day_type, kind, scheduled_task_id, time_from) VALUES
   ('*', 'task', (SELECT id FROM scheduled_task WHERE name = 'template-sync'), '05:00'),
-  ('*', 'task', (SELECT id FROM scheduled_task WHERE name = 'autoreset'), '04:00'),
   ('1', 'task', (SELECT id FROM scheduled_task WHERE name = 'self-improve'), '03:00')
 ON CONFLICT (day_type, scheduled_task_id) WHERE kind = 'task' AND scheduled_task_id IS NOT NULL
   DO NOTHING;
