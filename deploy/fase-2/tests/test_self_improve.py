@@ -323,6 +323,9 @@ class _FakeConn:
     def cursor(self, cursor_factory=None):
         return self._cursor
 
+    def set_client_encoding(self, encoding):
+        pass
+
     def close(self):
         self.closed = True
 
