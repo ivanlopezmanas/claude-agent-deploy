@@ -9,6 +9,13 @@ sys.path.insert(0, "/home/<agent>/workspace/scripts/lib")
 import heartbeat as hb
 
 
+@pytest.fixture(autouse=True)
+def _isolate_log(monkeypatch, tmp_path):
+    # log() escribe en hb.LOG sin abstracción -- sin esto, los tests de rutas
+    # de error escriben literales tipo "boom" en el heartbeat.log real.
+    monkeypatch.setattr(hb, "LOG", str(tmp_path / "heartbeat.log"))
+
+
 def _row(id="row-1", event_type="alert", payload=None, **extra):
     base = {
         "id": id, "source": "test", "event_type": event_type,
