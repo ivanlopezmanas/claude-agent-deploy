@@ -781,6 +781,7 @@ with open(sys.argv[1], "w") as f:
 PYEOF
   umask "${old_umask}"
   lxc_exec "mkdir -p ${AH}/workspace/state"
+  lxc_exec "chown ${AGENT_NAME}:${AGENT_NAME} ${AH}/workspace/state"
   pct push "${VMID}" "${tmp_identity}" "${AH}/workspace/state/instance-identity.json" --perms 600
   lxc_exec "chown ${AGENT_NAME}:${AGENT_NAME} ${AH}/workspace/state/instance-identity.json"
   rm -f "${tmp_identity}"
