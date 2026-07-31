@@ -17,6 +17,10 @@ import sys
 LOG_PATH = '/home/<agent>/logs/claude-telegram.log'
 SETTINGS_PATH = '/home/<agent>/claude/.claude/settings.json'
 CLAUDE_BIN = '/home/<agent>/claude/.local/bin/claude'
+# Modelo fijado explícitamente: sin --model, Claude Code hereda el default de la
+# cuenta, que puede cambiar solo tras una migración (pasó — el servicio acabó
+# corriendo Opus 5 sin que nadie lo tocara).
+MODEL = 'sonnet'
 
 master_fd, slave_fd = pty.openpty()
 
@@ -37,11 +41,16 @@ if pid == 0:
     env['PATH'] = ('/home/<agent>/apps/bin:/home/<agent>/claude/.local/bin:'
                    '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin')
     env['<AGENT>_CONTEXT'] = 'main'
+    # Marca que solo pone este wrapper -- distingue esta sesión de un terminal
+    # manual para que sessionstart-hook.py sepa cuándo volcar su identidad
+    # a telegram-session.json (ver manual_reset.py).
+    env['<AGENT>_SERVICE'] = 'telegram'
     env['TERM'] = 'xterm-256color'
     env['COLUMNS'] = '220'
     env['LINES'] = '50'
     os.execvpe(CLAUDE_BIN,
                ['claude',
+                '--model', MODEL,
                 '--channels', 'plugin:telegram@claude-plugins-official',
                 '--settings', SETTINGS_PATH],
                env)
