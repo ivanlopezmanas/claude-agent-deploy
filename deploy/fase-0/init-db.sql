@@ -315,6 +315,14 @@ CREATE TABLE agent_backup_log (
 );
 
 -- ---- §13 Multiusuario: agent_user_roles -------------------------------------
+-- Postgres no admite subqueries directas dentro de un CHECK -- de ahí la
+-- función intermedia. STABLE, no IMMUTABLE: consulta el catálogo
+-- (pg_timezone_names), que sí puede cambiar entre versiones/actualizaciones
+-- del propio Postgres, aunque no dentro de una misma transacción.
+CREATE OR REPLACE FUNCTION is_valid_timezone(tz text) RETURNS boolean AS $$
+  SELECT tz IN (SELECT name FROM pg_timezone_names);
+$$ LANGUAGE sql STABLE;
+
 CREATE TABLE agent_user_roles (
   id           BIGSERIAL PRIMARY KEY,
   user_id      BIGINT NOT NULL UNIQUE,   -- Telegram user_id (o equivalente según canal)
@@ -323,6 +331,13 @@ CREATE TABLE agent_user_roles (
   tools_allow  TEXT[],                   -- allowlist explícita (NULL = defaults del rol)
   tools_deny   TEXT[],                   -- denylist explícita (prevalece sobre tools_allow)
   active       BOOLEAN DEFAULT true,
+  -- Zona horaria ACTUAL del usuario de esta fila (IANA, ej. "Europe/Madrid").
+  -- Fuente única de verdad para cualquier conversión de hora local -> UTC en
+  -- todo el agente (ver inbox.py:get_owner_timezone/local_naive_to_utc) --
+  -- nunca asumir la hora del servidor. Se actualiza con un UPDATE simple
+  -- cuando el usuario viaja; todo lo que la lee la relee en caliente, no hay
+  -- que reiniciar nada.
+  timezone     TEXT NOT NULL DEFAULT '<owner_timezone>' CHECK (is_valid_timezone(timezone)),
   created_at   TIMESTAMPTZ DEFAULT now(),
   updated_at   TIMESTAMPTZ DEFAULT now(),
   notes        TEXT

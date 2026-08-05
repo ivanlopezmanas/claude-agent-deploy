@@ -1,0 +1,28 @@
+# /etc/systemd/system/inbox.service
+# Receptor HTTP para integraciones externas (n8n, Home Assistant...) que
+# quieran crear eventos en agent_inbox sin acceso directo a Postgres. Sin
+# prefijo de nombre de agente a propósito -- a diferencia de los hooks
+# (<agent>-*.py), este par de units es genérico entre instancias.
+[Unit]
+Description=<Agent> inbox webhook receiver (activado por socket, sin daemon permanente)
+Requires=inbox.socket
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/<agent>/workspace/scripts/lib/inbox_api.py
+User=<agent>
+Group=<agent>
+EnvironmentFile=/etc/<agent>/secrets.env
+WorkingDirectory=/home/<agent>/workspace/scripts/lib
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/home/<agent>/logs
+PrivateTmp=yes
+
+# Sin Restart= a propósito: inbox_api.py se apaga solo tras
+# IDLE_TIMEOUT_SECONDS de inactividad (exit 0, no fallo) e inbox.socket lo
+# vuelve a lanzar en la siguiente conexión -- reiniciarlo aquí encima
+# duplicaría ese mecanismo.
+
+[Install]
+WantedBy=multi-user.target

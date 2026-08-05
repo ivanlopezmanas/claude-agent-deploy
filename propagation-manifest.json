@@ -11,6 +11,8 @@
   "rules": [
     { "match": "etc/<agent>/secrets.env", "classification": "never" },
     { "match": "workspace/state/", "classification": "never" },
+    { "match": "claude/.claude/agents/", "classification": "propagable", "repo_dir": "deploy/fase-2/agents/" },
+    { "match": "claude/.claude/skills/", "classification": "propagable", "repo_dir": "deploy/fase-2/skills/" },
     { "match": "claude/.claude/", "classification": "never" },
     { "match": "claude/.claude.json", "classification": "never" },
     { "match": ".ssh/", "classification": "never" },
@@ -25,6 +27,7 @@
     { "match": "workspace/scripts/lib/claude-telegram-start.sh", "classification": "propagable", "repo_path": "deploy/fase-0/scripts/lib/claude-telegram-start.sh" },
     { "match": "workspace/scripts/lib/patch-telegram-plugin.sh", "classification": "propagable", "repo_path": "deploy/fase-0/scripts/lib/patch-telegram-plugin.sh" },
     { "match": "workspace/scripts/lib/retrofit-template.sh", "classification": "propagable", "repo_path": "deploy/fase-0/scripts/lib/retrofit-template.sh" },
+    { "match": "workspace/scripts/lib/prompts/heartbeat.md", "classification": "propagable", "repo_path": "deploy/fase-0/scripts/lib/prompts/heartbeat.md" },
 
     { "match": "workspace/scripts/lib/common.py", "classification": "propagable", "repo_path": "deploy/fase-1/scripts/lib/common.py" },
     { "match": "workspace/scripts/lib/workspace.json", "classification": "propagable", "repo_path": "deploy/fase-1/scripts/lib/workspace.json" },
@@ -44,8 +47,6 @@
 
     { "match": "workspace/scripts/lib/", "classification": "propagable", "repo_dir": "deploy/fase-futura/scripts/lib/", "note": "fallback para scripts nuevos sin entrada explícita arriba -- fase-futura es donde aterrizan las librerías más recientes" },
     { "match": "workspace/scripts/hooks/", "classification": "propagable", "repo_dir": "deploy/fase-1/scripts/hooks/" },
-    { "match": "workspace/tests/", "classification": "propagable", "repo_dir": "deploy/fase-2/tests/" },
-    { "match": "claude/.claude/agents/", "classification": "propagable", "repo_dir": "deploy/fase-2/agents/" },
-    { "match": "claude/.claude/skills/", "classification": "propagable", "repo_dir": "deploy/fase-2/skills/" }
+    { "match": "workspace/tests/", "classification": "propagable", "repo_dir": "deploy/fase-2/tests/" }
   ]
 }
