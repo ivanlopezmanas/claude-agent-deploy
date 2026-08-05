@@ -186,7 +186,10 @@ class TestReconcileDay:
 
         mn.reconcile_day(cur, target)
 
-        query, params = cur.queries[0]
+        # queries[0] es el lookup de owner_tz (inbox.get_owner_timezone) que
+        # reconcile_day hace una sola vez por ejecución antes de la query de
+        # schedule_config.
+        query, params = cur.queries[1]
         assert set(params[0]) == {"3", "*"}
         assert params[1] == target
 
@@ -196,14 +199,14 @@ class TestReconcileDay:
 
         mn.reconcile_day(cur, date(2026, 7, 22))
 
-        params = cur.queries[0][1]
+        params = cur.queries[1][1]
         assert set(params[0]) == {"3", "*", "H"}
 
     def test_dispatches_slot_rows_to_materialize_slot(self, monkeypatch):
         monkeypatch.setattr(mn, "resolve_calendar_day_type", lambda t: None)
         called = []
         monkeypatch.setattr(mn, "materialize_slot",
-                             lambda cur, target, r: called.append(r) or True)
+                             lambda cur, target, r, owner_tz: called.append(r) or True)
         cur = _FakeCursor(fetchall_results=[[_row(kind="slot")]])
 
         result = mn.reconcile_day(cur, date(2026, 7, 22))
@@ -215,7 +218,7 @@ class TestReconcileDay:
         monkeypatch.setattr(mn, "resolve_calendar_day_type", lambda t: None)
         called = []
         monkeypatch.setattr(mn, "enqueue_scheduled_task",
-                             lambda cur, target, r: called.append(r) or True)
+                             lambda cur, target, r, owner_tz: called.append(r) or True)
         cur = _FakeCursor(fetchall_results=[[_row(kind="task", task_kind="core")]])
 
         result = mn.reconcile_day(cur, date(2026, 7, 22))
@@ -225,7 +228,7 @@ class TestReconcileDay:
 
     def test_false_from_handler_not_counted(self, monkeypatch):
         monkeypatch.setattr(mn, "resolve_calendar_day_type", lambda t: None)
-        monkeypatch.setattr(mn, "materialize_slot", lambda cur, target, r: False)
+        monkeypatch.setattr(mn, "materialize_slot", lambda cur, target, r, owner_tz: False)
         cur = _FakeCursor(fetchall_results=[[_row(kind="slot")]])
 
         result = mn.reconcile_day(cur, date(2026, 7, 22))
@@ -234,8 +237,8 @@ class TestReconcileDay:
 
     def test_mixed_batch_counts_each_kind_separately(self, monkeypatch):
         monkeypatch.setattr(mn, "resolve_calendar_day_type", lambda t: None)
-        monkeypatch.setattr(mn, "materialize_slot", lambda cur, target, r: True)
-        monkeypatch.setattr(mn, "enqueue_scheduled_task", lambda cur, target, r: True)
+        monkeypatch.setattr(mn, "materialize_slot", lambda cur, target, r, owner_tz: True)
+        monkeypatch.setattr(mn, "enqueue_scheduled_task", lambda cur, target, r, owner_tz: True)
         cur = _FakeCursor(fetchall_results=[[_row(kind="slot"), _row(kind="task")]])
 
         result = mn.reconcile_day(cur, date(2026, 7, 22))
@@ -249,21 +252,21 @@ class TestMaterializeSlot:
         cur = _FakeCursor(rowcounts=[1])
         r = _row(kind="slot", time_from=dtime(9, 0), time_to=dtime(10, 0))
 
-        assert mn.materialize_slot(cur, date(2026, 7, 22), r) is True
+        assert mn.materialize_slot(cur, date(2026, 7, 22), r, "Europe/Madrid") is True
         assert "INSERT INTO daily_schedule" in cur.queries[0][0]
 
     def test_invalid_window_skipped_without_query(self):
         cur = _FakeCursor()
         r = _row(time_from=dtime(10, 0), time_to=dtime(9, 0))
 
-        assert mn.materialize_slot(cur, date(2026, 7, 22), r) is False
+        assert mn.materialize_slot(cur, date(2026, 7, 22), r, "Europe/Madrid") is False
         assert cur.queries == []
 
     def test_conflict_do_nothing_returns_false(self):
         cur = _FakeCursor(rowcounts=[0])
         r = _row()
 
-        assert mn.materialize_slot(cur, date(2026, 7, 22), r) is False
+        assert mn.materialize_slot(cur, date(2026, 7, 22), r, "Europe/Madrid") is False
 
     def test_db_error_is_caught_and_returns_false(self, monkeypatch):
         cur = _FakeCursor()
@@ -274,7 +277,30 @@ class TestMaterializeSlot:
         monkeypatch.setattr(cur, "execute", _raise)
         r = _row()
 
-        assert mn.materialize_slot(cur, date(2026, 7, 22), r) is False
+        assert mn.materialize_slot(cur, date(2026, 7, 22), r, "Europe/Madrid") is False
+
+    def test_converts_local_wall_clock_to_utc_summer(self):
+        """Regresión del bug original: 03:00 pensada como Madrid, en verano
+        (CEST, UTC+2), debe guardarse como 01:00 UTC -- no como 03:00 UTC."""
+        cur = _FakeCursor(rowcounts=[1])
+        r = _row(kind="slot", time_from=dtime(3, 0), time_to=dtime(4, 0))
+
+        mn.materialize_slot(cur, date(2026, 8, 3), r, "Europe/Madrid")
+
+        _, params = cur.queries[0]
+        start_ts = params[3]
+        assert start_ts.isoformat() == "2026-08-03T01:00:00+00:00"
+
+    def test_converts_local_wall_clock_to_utc_winter(self):
+        """Mismo caso en invierno (CET, UTC+1): 03:00 Madrid -> 02:00 UTC."""
+        cur = _FakeCursor(rowcounts=[1])
+        r = _row(kind="slot", time_from=dtime(3, 0), time_to=dtime(4, 0))
+
+        mn.materialize_slot(cur, date(2026, 1, 12), r, "Europe/Madrid")
+
+        _, params = cur.queries[0]
+        start_ts = params[3]
+        assert start_ts.isoformat() == "2026-01-12T02:00:00+00:00"
 
 
 # ----------------------------------------------------------------- enqueue_scheduled_task()
@@ -289,7 +315,7 @@ class TestEnqueueScheduledTask:
     def test_skips_if_already_pending(self):
         cur = _FakeCursor(fetchone_results=[(1,)])
 
-        result = mn.enqueue_scheduled_task(cur, date(2026, 7, 22), self._core_row())
+        result = mn.enqueue_scheduled_task(cur, date(2026, 7, 22), self._core_row(), "Europe/Madrid")
 
         assert result is False
         assert len(cur.queries) == 1  # solo el SELECT de comprobación, sin INSERT
@@ -297,7 +323,7 @@ class TestEnqueueScheduledTask:
     def test_core_kind_enqueues_task_event_with_script_path(self):
         cur = _FakeCursor(fetchone_results=[None])
 
-        result = mn.enqueue_scheduled_task(cur, date(2026, 7, 22), self._core_row())
+        result = mn.enqueue_scheduled_task(cur, date(2026, 7, 22), self._core_row(), "Europe/Madrid")
 
         assert result is True
         insert_query, params = cur.queries[1]
@@ -306,7 +332,8 @@ class TestEnqueueScheduledTask:
         payload = json.loads(params[2])
         assert payload == {"core_task": "autoreset",
                             "script_path": "workspace/scripts/lib/autoreset.py"}
-        assert params[5] == 5  # scheduled_task_id
+        assert params[4] == "any"           # agent
+        assert params[6] == 5               # scheduled_task_id
 
     def test_briefing_kind_enqueues_scheduled_task_event_with_prompt_file(self):
         cur = _FakeCursor(fetchone_results=[None])
@@ -314,7 +341,7 @@ class TestEnqueueScheduledTask:
                  prompt_file="prompts/briefing.md", time_from=dtime(7, 30),
                  task_severity="medium")
 
-        result = mn.enqueue_scheduled_task(cur, date(2026, 7, 22), r)
+        result = mn.enqueue_scheduled_task(cur, date(2026, 7, 22), r, "Europe/Madrid")
 
         assert result is True
         insert_query, params = cur.queries[1]
@@ -326,18 +353,33 @@ class TestEnqueueScheduledTask:
     def test_dedupe_key_includes_task_name_and_date(self):
         cur = _FakeCursor(fetchone_results=[None])
 
-        mn.enqueue_scheduled_task(cur, date(2026, 7, 22), self._core_row())
+        mn.enqueue_scheduled_task(cur, date(2026, 7, 22), self._core_row(), "Europe/Madrid")
 
         params = cur.queries[1][1]
-        assert params[4] == "scheduled_task:autoreset:2026-07-22"
+        assert params[5] == "scheduled_task:autoreset:2026-07-22"
 
     def test_source_prefix_used_for_pending_check(self):
         cur = _FakeCursor(fetchone_results=[None])
 
-        mn.enqueue_scheduled_task(cur, date(2026, 7, 22), self._core_row())
+        mn.enqueue_scheduled_task(cur, date(2026, 7, 22), self._core_row(), "Europe/Madrid")
 
         select_query, select_params = cur.queries[0]
         assert select_params[0] == "scheduled_task:autoreset"
+
+    def test_uses_owner_timezone_for_process_after(self):
+        """El helper compartido (inbox.create_task) recibe owner_tz explícito
+        -- enqueue_scheduled_task no debe volver a consultarlo por su cuenta
+        (solo reconcile_day lo hace, una vez por ejecución)."""
+        cur = _FakeCursor(fetchone_results=[None])
+        r = self._core_row(time_from=dtime(3, 0))  # 03:00 madrugada de Madrid
+
+        mn.enqueue_scheduled_task(cur, date(2026, 8, 3), r, "Europe/Madrid")
+
+        params = cur.queries[1][1]
+        process_after = params[7]
+        assert process_after.isoformat() == "2026-08-03T01:00:00+00:00"  # 03:00 CEST -> 01:00 UTC
+        # y ningún query adicional de owner_tz: solo el SELECT de pending-check + el INSERT
+        assert len(cur.queries) == 2
 
 
 # ----------------------------------------------------------------- main()
