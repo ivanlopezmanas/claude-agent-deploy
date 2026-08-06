@@ -11,6 +11,8 @@
   "rules": [
     { "match": "etc/<agent>/secrets.env", "classification": "never" },
     { "match": "workspace/state/", "classification": "never" },
+    { "match": "claude/.claude/agents/", "classification": "propagable", "repo_dir": "deploy/fase-2/agents/" },
+    { "match": "claude/.claude/skills/", "classification": "propagable", "repo_dir": "deploy/fase-2/skills/" },
     { "match": "claude/.claude/", "classification": "never" },
     { "match": "claude/.claude.json", "classification": "never" },
     { "match": ".ssh/", "classification": "never" },
@@ -27,6 +29,7 @@
     { "match": "workspace/scripts/lib/retrofit-template.sh", "classification": "propagable", "repo_path": "deploy/fase-0/scripts/lib/retrofit-template.sh" },
 
     { "match": "workspace/scripts/lib/common.py", "classification": "propagable", "repo_path": "deploy/fase-1/scripts/lib/common.py" },
+    { "match": "workspace/scripts/lib/context.py", "classification": "propagable", "repo_path": "deploy/fase-1/scripts/lib/context.py" },
     { "match": "workspace/scripts/lib/workspace.json", "classification": "propagable", "repo_path": "deploy/fase-1/scripts/lib/workspace.json" },
     { "match": "workspace/scripts/lib/agent-permissions.json", "classification": "propagable", "repo_path": "deploy/fase-1/scripts/lib/agent-permissions.json" },
 
@@ -39,13 +42,20 @@
     { "match": "workspace/scripts/lib/midnight.py", "classification": "propagable", "repo_path": "deploy/fase-futura/scripts/lib/midnight.py" },
     { "match": "workspace/scripts/lib/chronicler.py", "classification": "propagable", "repo_path": "deploy/fase-futura/scripts/lib/chronicler.py" },
     { "match": "workspace/scripts/lib/distill-transcript.py", "classification": "propagable", "repo_path": "deploy/fase-futura/scripts/lib/distill-transcript.py" },
-    { "match": "workspace/scripts/lib/self-improve.sh", "classification": "propagable", "repo_path": "deploy/fase-futura/scripts/lib/self-improve.sh" },
     { "match": "workspace/scripts/lib/template_sync.py", "classification": "propagable", "repo_path": "deploy/fase-futura/scripts/lib/template_sync.py" },
+    { "match": "workspace/scripts/lib/reset_sequence.py", "classification": "propagable", "repo_path": "deploy/fase-futura/scripts/lib/reset_sequence.py" },
+    { "match": "workspace/scripts/lib/manual_reset.py", "classification": "propagable", "repo_path": "deploy/fase-futura/scripts/lib/manual_reset.py" },
+    { "match": "workspace/scripts/lib/init-db.sql", "classification": "propagable", "repo_path": "deploy/fase-0/init-db.sql" },
+
+    { "match": "workspace/scripts/hooks/sessionend-hook.py", "classification": "propagable", "repo_path": "deploy/fase-2/scripts/hooks/sessionend-hook.py" },
+    { "match": "workspace/scripts/hooks/sessionstart-hook.py", "classification": "propagable", "repo_path": "deploy/fase-2/scripts/hooks/sessionstart-hook.py" },
+    { "match": "workspace/scripts/hooks/posttooluse-hook.py", "classification": "propagable", "repo_path": "deploy/fase-2/scripts/hooks/posttooluse-hook.py" },
+    { "match": "workspace/scripts/hooks/notification-hook.py", "classification": "propagable", "repo_path": "deploy/fase-2/scripts/hooks/notification-hook.py" },
+    { "match": "workspace/scripts/hooks/precompact-hook.py", "classification": "propagable", "repo_path": "deploy/fase-2/scripts/hooks/precompact-hook.py" },
+    { "match": "workspace/scripts/hooks/mcp-postgres-only.json", "classification": "propagable", "repo_path": "deploy/fase-2/scripts/hooks/mcp-postgres-only.json" },
 
     { "match": "workspace/scripts/lib/", "classification": "propagable", "repo_dir": "deploy/fase-futura/scripts/lib/", "note": "fallback para scripts nuevos sin entrada explícita arriba -- fase-futura es donde aterrizan las librerías más recientes" },
     { "match": "workspace/scripts/hooks/", "classification": "propagable", "repo_dir": "deploy/fase-1/scripts/hooks/" },
-    { "match": "workspace/tests/", "classification": "propagable", "repo_dir": "deploy/fase-2/tests/" },
-    { "match": "claude/.claude/agents/", "classification": "propagable", "repo_dir": "deploy/fase-2/agents/" },
-    { "match": "claude/.claude/skills/", "classification": "propagable", "repo_dir": "deploy/fase-2/skills/" }
+    { "match": "workspace/tests/", "classification": "propagable", "repo_dir": "deploy/fase-2/tests/" }
   ]
 }
