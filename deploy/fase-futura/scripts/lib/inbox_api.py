@@ -84,8 +84,14 @@ def authenticate(secrets: dict, presented: str) -> str | None:
     if not presented:
         return None
     for label, secret in secrets.items():
-        if secret and hmac.compare_digest(presented, secret):
-            return label
+        try:
+            if secret and hmac.compare_digest(presented, secret):
+                return label
+        except TypeError:
+            # compare_digest exige str ASCII-only; una cabecera con bytes
+            # fuera de rango (decodificados en latin-1 por el parser HTTP)
+            # la rompe -- se trata como intento fallido, no como 500.
+            continue
     return None
 
 
@@ -140,6 +146,10 @@ def validate_request_body(data) -> dict:
 # --------------------------------------------------------------------------
 class InboxHandler(BaseHTTPRequestHandler):
     server_version = "<Agent>InboxAPI/1.0"
+    timeout = 10  # sin esto, un cliente que abre conexión y no manda cuerpo
+                  # deja rfile.read() bloqueado para siempre y tumba el
+                  # servidor entero (es mono-hilo). http.server ya captura
+                  # socket.timeout en handle_one_request y cierra la conexión.
 
     def log_message(self, fmt, *args):
         log(f"[HTTP] {self.address_string()} {fmt % args}")
@@ -167,7 +177,11 @@ class InboxHandler(BaseHTTPRequestHandler):
             self._reply(401, {"error": "unauthorized"})
             return
 
-        length = int(self.headers.get('Content-Length', 0) or 0)
+        try:
+            length = int(self.headers.get('Content-Length', 0) or 0)
+        except ValueError:
+            self._reply(400, {"error": "content-length inválido"})
+            return
         if length <= 0 or length > MAX_BODY_BYTES:
             self._reply(400, {"error": "content-length inválido o excesivo"})
             return
