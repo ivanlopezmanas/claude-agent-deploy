@@ -7,7 +7,7 @@ Usage: python3 distill-transcript.py <path-to-session.jsonl>
 Output (stdout):
     TOTAL_TURNS: N
     ========================================
-    IVAN: <message>
+    USER: <message>
 
     <AGENT>: <message>
     ...
@@ -49,7 +49,7 @@ def extract(path):
             if obj.get('type') not in ('user', 'assistant'):
                 continue
             content = obj.get('message', {}).get('content', '')
-            label = 'IVAN' if obj.get('type') == 'user' else '<AGENT>'
+            label = 'USER' if obj.get('type') == 'user' else '<AGENT>'
             if isinstance(content, str):
                 text = clean(content)
                 if text:

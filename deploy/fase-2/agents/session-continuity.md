@@ -28,7 +28,7 @@ devolver el estado en el que quedó la tarea en curso.
 
 1. Lee el transcript ejecutando con Bash:
    `python3 /home/<agent>/workspace/scripts/lib/distill-transcript.py {transcript_path}`.
-   Usa esa salida (diálogo limpio IVAN/NOX, sin ruido de tool calls ni XML) como
+   Usa esa salida (diálogo limpio USER/<AGENT>, sin ruido de tool calls ni XML) como
    el contenido del transcript — no leas el `.jsonl` crudo con Read.
 2. Identifica la tarea principal que estaba en curso (la que quedó sin terminar
    o sin confirmación explícita de cierre).
