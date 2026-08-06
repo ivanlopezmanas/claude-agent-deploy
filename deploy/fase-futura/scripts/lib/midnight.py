@@ -30,6 +30,8 @@ from datetime import datetime, date, timedelta
 import psycopg2
 import psycopg2.extras
 
+import inbox
+
 LOG = '/home/<agent>/logs/midnight.log'
 DB_DSN = os.environ.get('POSTGRES_CONNECTION_STRING', '')
 
@@ -120,6 +122,10 @@ def reconcile_day(cur, target: date) -> dict:
     if calendar_type:
         day_types.add(calendar_type)
 
+    # Una sola consulta por ejecución -- el resto de esta función reutiliza
+    # owner_tz en vez de releerla fila a fila.
+    owner_tz = inbox.get_owner_timezone(cur)
+
     cur.execute(
         "SELECT sc.id, sc.kind, sc.time_from, sc.time_to, "
         "       st.name AS slot_name, st.is_modifier, "
@@ -141,17 +147,20 @@ def reconcile_day(cur, target: date) -> dict:
     enqueued = 0
     for r in rows:
         if r['kind'] == 'slot':
-            if materialize_slot(cur, target, r):
+            if materialize_slot(cur, target, r, owner_tz):
                 materialized += 1
         else:
-            if enqueue_scheduled_task(cur, target, r):
+            if enqueue_scheduled_task(cur, target, r, owner_tz):
                 enqueued += 1
     return {'materialized': materialized, 'enqueued': enqueued}
 
 
-def materialize_slot(cur, target: date, r: dict) -> bool:
-    start_ts = datetime.combine(target, r['time_from'])
-    end_ts = datetime.combine(target, r['time_to'])
+def materialize_slot(cur, target: date, r: dict, owner_tz: str) -> bool:
+    # r['time_from']/r['time_to'] son hora de pared del owner (ej. "03:00"
+    # pensada como madrugada de Madrid) -- nunca UTC directo, ver
+    # inbox.local_naive_to_utc().
+    start_ts = inbox.local_naive_to_utc(datetime.combine(target, r['time_from']), owner_tz)
+    end_ts = inbox.local_naive_to_utc(datetime.combine(target, r['time_to']), owner_tz)
     if end_ts <= start_ts:
         log(f"[SKIP] ventana inválida slot={r['slot_name']} {start_ts}-{end_ts}")
         return False
@@ -171,12 +180,17 @@ def materialize_slot(cur, target: date, r: dict) -> bool:
         return False
 
 
-def enqueue_scheduled_task(cur, target: date, r: dict) -> bool:
+def enqueue_scheduled_task(cur, target: date, r: dict, owner_tz: str) -> bool:
     """Encola en agent_inbox la ejecución de mañana del scheduled_task de la
     fila `r`, si no hay ya una entrada pendiente para él. 'core' se resuelve
     como script determinista (event_type='task' + payload.script_path,
     exactamente el contrato que espera heartbeat.py); 'briefing'/'monitor'
-    lo redacta el modelo (event_type='scheduled_task' + prompt_file)."""
+    lo redacta el modelo (event_type='scheduled_task' + prompt_file).
+
+    El INSERT en sí vive en inbox.create_task() -- punto de entrada único,
+    compartido con lo que crea el modelo en conversación y con el webhook
+    externo -- para que la conversión de zona horaria no dependa de que cada
+    caller se acuerde de hacerla bien."""
     source = f"scheduled_task:{r['task_name']}"
     cur.execute(
         "SELECT 1 FROM agent_inbox "
@@ -187,7 +201,6 @@ def enqueue_scheduled_task(cur, target: date, r: dict) -> bool:
     if cur.fetchone():
         return False
 
-    process_after = datetime.combine(target, r['time_from'])
     dedupe_key = f"{source}:{target.isoformat()}"
 
     if r['task_kind'] == 'core':
@@ -197,15 +210,21 @@ def enqueue_scheduled_task(cur, target: date, r: dict) -> bool:
         event_type = 'scheduled_task'
         payload = {"scheduled_task": r['task_name'], "prompt_file": r['prompt_file']}
 
-    cur.execute(
-        "INSERT INTO agent_inbox (source, event_type, payload, severity, agent, "
-        "dedupe_key, scheduled_task_id, process_after) "
-        "VALUES (%s, %s, %s::jsonb, %s, 'any', %s, %s, %s)",
-        (source, event_type, json.dumps(payload), r['task_severity'],
-         dedupe_key, r['task_id'], process_after)
+    when_local = datetime.combine(target, r['time_from'])
+    inbox.create_task(
+        cur,
+        source=source,
+        event_type=event_type,
+        payload=payload,
+        severity=r['task_severity'],
+        agent='any',
+        dedupe_key=dedupe_key,
+        scheduled_task_id=r['task_id'],
+        when_local=when_local,
+        owner_timezone=owner_tz,
     )
     log(f"[SCHEDULED_TASK] encolada '{r['task_name']}' (kind={r['task_kind']}) "
-        f"para {process_after.isoformat()}")
+        f"para {when_local.isoformat()} hora de {owner_tz}")
     return True
 
 

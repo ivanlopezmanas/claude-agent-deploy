@@ -174,9 +174,11 @@ ask_secret_confirm PG_PASSWORD        "Password de PostgreSQL (oculto)"
 ask_secret TELEGRAM_BOT_TOKEN "Bot token de Telegram (oculto)"
 ask TELEGRAM_CHAT_ID  "Chat ID del propietario"         ""
 ask OWNER_NAME        "Nombre del propietario (para la BD)"  ""
+ask OWNER_TIMEZONE    "Zona horaria del propietario (IANA, ej. Europe/Madrid)" "Europe/Madrid"
 ask_secret GITHUB_TOKEN    "Token de GitHub para que el agente pueda propagar mejoras al template vía PR (oculto; fase 2 de claude-agent-deploy)"
 ask GITHUB_USERNAME   "Usuario de GitHub asociado a ese token (para el email de commit del agente)" ""
 ask_secret N8N_WEBHOOK_SECRET "Secreto compartido (Header Auth) para toda llamada del agente a webhooks de n8n (oculto; fase-futura, calendario)"
+ask_secret INBOX_SECRET "Secreto compartido para el receptor HTTP del inbox (webhook entrante de integraciones externas tipo n8n/Home Assistant; oculto; fase-futura)"
 read -rp "Clave pública SSH del propietario (opcional, ENTER para omitir): " OWNER_SSH_KEY
 ask DEPLOY_SRC        "Directorio con los templates"    "${SCRIPT_DIR}"
 ask PROXMOX_TEMPLATE  "Template LXC"                    "local:vztmpl/debian-12-standard_12.12-1_amd64.tar.zst"
@@ -213,6 +215,7 @@ cat <<EOF
   Red               : ip=${IP_ADDRESS} gw=${GATEWAY} dns=${DNS}
   Telegram chat_id  : ${TELEGRAM_CHAT_ID}
   Owner name        : ${OWNER_NAME}
+  Owner timezone    : ${OWNER_TIMEZONE}
   Root password     : (oculto, ${#ROOT_PASSWORD} caracteres)
   Agent password    : (oculto, ${#AGENT_PASSWORD} caracteres)
   PG password       : (oculto, ${#PG_PASSWORD} caracteres)
@@ -220,6 +223,7 @@ cat <<EOF
   GitHub token      : (oculto, ${#GITHUB_TOKEN} caracteres)
   GitHub username   : ${GITHUB_USERNAME}
   n8n webhook secret: (oculto, ${#N8N_WEBHOOK_SECRET} caracteres)
+  inbox secret      : (oculto, ${#INBOX_SECRET} caracteres)
   Templates (src)   : ${DEPLOY_SRC}
   Template LXC      : ${PROXMOX_TEMPLATE}
 EOF
@@ -395,6 +399,7 @@ step_08_init_db() {
   PG_PASSWORD="${PG_PASSWORD}" perl -i -pe 's/\Q<SUSTITUIR_PASSWORD>\E/$ENV{PG_PASSWORD}/g' "${tmp_sql}"
   TELEGRAM_CHAT_ID="${TELEGRAM_CHAT_ID}" perl -i -pe 's/\Q<owner_chat_id>\E/$ENV{TELEGRAM_CHAT_ID}/g' "${tmp_sql}"
   OWNER_NAME="${OWNER_NAME}" perl -i -pe 's/\Q<owner_name>\E/$ENV{OWNER_NAME}/g' "${tmp_sql}"
+  OWNER_TIMEZONE="${OWNER_TIMEZONE}" perl -i -pe 's/\Q<owner_timezone>\E/$ENV{OWNER_TIMEZONE}/g' "${tmp_sql}"
 
   # Copiar al LXC y ejecutar
   pct push "${VMID}" "${tmp_sql}" /tmp/init-db.sql --perms 600
@@ -551,13 +556,14 @@ POSTGRES_CONNECTION_STRING=postgresql://${AGENT_NAME}:${PG_PASSWORD}@localhost:5
 GITHUB_TOKEN=${GITHUB_TOKEN}
 GITHUB_USERNAME=${GITHUB_USERNAME}
 N8N_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET}
+INBOX_SECRET=${INBOX_SECRET}
 EOF
   umask "${old_umask}"
   pct push "${VMID}" "${tmp_secrets}" "/etc/${AGENT_NAME}/secrets.env" --perms 640
   lxc_exec "chown root:${AGENT_NAME} /etc/${AGENT_NAME}/secrets.env"
   rm -f "${tmp_secrets}"
   # Verificar (sin imprimir el contenido): solo que las claves obligatorias están
-  lxc_exec "grep -q '^TELEGRAM_BOT_TOKEN=' /etc/${AGENT_NAME}/secrets.env && grep -q '^POSTGRES_CONNECTION_STRING=' /etc/${AGENT_NAME}/secrets.env && grep -q '^GITHUB_TOKEN=' /etc/${AGENT_NAME}/secrets.env && grep -q '^N8N_WEBHOOK_SECRET=' /etc/${AGENT_NAME}/secrets.env"
+  lxc_exec "grep -q '^TELEGRAM_BOT_TOKEN=' /etc/${AGENT_NAME}/secrets.env && grep -q '^POSTGRES_CONNECTION_STRING=' /etc/${AGENT_NAME}/secrets.env && grep -q '^GITHUB_TOKEN=' /etc/${AGENT_NAME}/secrets.env && grep -q '^N8N_WEBHOOK_SECRET=' /etc/${AGENT_NAME}/secrets.env && grep -q '^INBOX_SECRET=' /etc/${AGENT_NAME}/secrets.env"
   # Fail-fast: confirmar aquí mismo que ${AGENT_NAME} puede leer el fichero
   # (grupo/permisos correctos) en vez de descubrirlo 15 pasos después en STEP_27.
   if ! lxc_exec "su -s /bin/bash ${AGENT_NAME} -c 'test -r /etc/${AGENT_NAME}/secrets.env'"; then
@@ -805,7 +811,7 @@ fi
 step_21_systemd_units() {
   local sd="${DEPLOY_TMP}/fase-0/systemd"
   local unit
-  for unit in claude-telegram.service heartbeat.timer heartbeat.service midnight.timer midnight.service; do
+  for unit in claude-telegram.service heartbeat.timer heartbeat.service midnight.timer midnight.service inbox.socket inbox.service; do
     if [[ -f "${sd}/${unit}" ]]; then
       pct push "${VMID}" "${sd}/${unit}" "/etc/systemd/system/${unit}" --perms 644
     else
@@ -1028,9 +1034,13 @@ cat <<EOF
   4. Filtro anti-injection (§1.8 paso 22b): el userprompt-hook arranca en fail-open
      hasta que exista /home/${AGENT_NAME}/apps/bin/clean. Implementar según §1.8 paso 22b.
   5. Crons (Fase H) NO instalados — diferidos a §8 (proactividad por core_task).
-  6. Secretos opcionales (UPTIME_KUMA_PUSH_URL, ${AGENT_UPPER}_INBOX_TOKEN, MQTT_BROKER,
-     PGBACKREST_*) no se han escrito: añádelos a /etc/${AGENT_NAME}/secrets.env cuando
-     despliegues sus secciones (§8.3, §9.9, §11.2, §11.4).
+  6. Secretos opcionales (UPTIME_KUMA_PUSH_URL, MQTT_BROKER, PGBACKREST_*) no se han
+     escrito: añádelos a /etc/${AGENT_NAME}/secrets.env cuando despliegues sus
+     secciones (§8.3, §9.9, §11.2, §11.4). INBOX_SECRET ya se escribe solo (paso 12).
+  7. El receptor del webhook (inbox.socket/inbox.service) no arranca por sí solo:
+       pct exec ${VMID} -- systemctl enable --now inbox.socket
+     Requiere que el puerto quede alcanzable desde tus integraciones (n8n, etc.) en
+     la LAN -- revisa firewall/reglas de red si procede.
 
   Para re-ejecutar este script: vuelve a lanzarlo desde el principio.
 

@@ -27,6 +27,7 @@
     { "match": "workspace/scripts/lib/claude-telegram-start.sh", "classification": "propagable", "repo_path": "deploy/fase-0/scripts/lib/claude-telegram-start.sh" },
     { "match": "workspace/scripts/lib/patch-telegram-plugin.sh", "classification": "propagable", "repo_path": "deploy/fase-0/scripts/lib/patch-telegram-plugin.sh" },
     { "match": "workspace/scripts/lib/retrofit-template.sh", "classification": "propagable", "repo_path": "deploy/fase-0/scripts/lib/retrofit-template.sh" },
+    { "match": "workspace/scripts/lib/prompts/heartbeat.md", "classification": "propagable", "repo_path": "deploy/fase-0/scripts/lib/prompts/heartbeat.md" },
 
     { "match": "workspace/scripts/lib/common.py", "classification": "propagable", "repo_path": "deploy/fase-1/scripts/lib/common.py" },
     { "match": "workspace/scripts/lib/context.py", "classification": "propagable", "repo_path": "deploy/fase-1/scripts/lib/context.py" },

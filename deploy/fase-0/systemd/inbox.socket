@@ -1,0 +1,13 @@
+# /etc/systemd/system/inbox.socket
+[Unit]
+Description=<Agent> inbox webhook socket (entrada externa a agent_inbox)
+
+[Socket]
+# IP LAN de este LXC -- no 0.0.0.0: solo la red local, no todas las
+# interfaces. <ip_address> ya es un placeholder sustituido por
+# install-agent.sh con la IP real de esta instancia.
+ListenStream=<ip_address>:8787
+Accept=no
+
+[Install]
+WantedBy=sockets.target

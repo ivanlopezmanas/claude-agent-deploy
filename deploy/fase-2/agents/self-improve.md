@@ -47,7 +47,7 @@ Si el prompt **no** trae ese bloque (invocación manual, sin pasar por heartbeat
 
 ## Paso 0 — Ancla: identidad + fecha
 
-Siempre, tenga o no evidencia pre-recopilada. Lee `CLAUDE.md` desde el directorio de trabajo actual -- es el marco normativo; toda desviación encontrada después es una desviación *de este documento*. Ejecuta `date` para la fecha de hoy. Ejecuta `claude --version 2>/dev/null || echo unknown` para la versión real del modelo en la cabecera del informe (nunca la hardcodees).
+Siempre, tenga o no evidencia pre-recopilada. Lee `CLAUDE.md` desde el directorio de trabajo actual -- es el marco normativo; toda desviación encontrada después es una desviación *de este documento*. Para la fecha/hora de hoy, **no ejecutes `date` a pelo** -- el servidor corre en UTC y la cabecera saldría en la hora equivocada para el usuario. Consulta primero su zona horaria actual (`SELECT timezone FROM agent_user_roles WHERE role='owner' AND active=true LIMIT 1`) y ejecuta `TZ='<esa zona>' date` (fallback `Europe/Madrid` si la consulta falla o la columna aún no existe). Ejecuta `claude --version 2>/dev/null || echo unknown` para la versión real del modelo en la cabecera del informe (nunca la hardcodees).
 
 ---
 
