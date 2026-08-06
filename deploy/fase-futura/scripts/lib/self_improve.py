@@ -317,6 +317,7 @@ def gather_memory() -> dict:
         return {'error': 'POSTGRES_CONNECTION_STRING no definida'}
     try:
         conn = psycopg2.connect(DB_DSN)
+        conn.set_client_encoding('UTF8')
         try:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute(

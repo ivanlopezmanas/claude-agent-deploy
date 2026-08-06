@@ -26,7 +26,7 @@ from common import call_isolated_agent
 
 LOG = '/home/<agent>/logs/<agent>-session-end.log'
 DISTILL_SCRIPT = '/home/<agent>/workspace/scripts/lib/distill-transcript.py'
-MCP_PG = '/home/<agent>/workspace/scripts/hooks/<agent>-mcp-postgres-only.json'
+MCP_PG = '/home/<agent>/workspace/scripts/hooks/mcp-postgres-only.json'
 IMPROVEMENTS_DIR = '/home/<agent>/workspace/docs/improvements'
 DB_DSN = os.environ.get('POSTGRES_CONNECTION_STRING', '')
 VALID_CATEGORIES = {'user', 'feedback', 'project', 'reference'}
@@ -105,6 +105,7 @@ def insert_memories(session_id, memories, user_id=None):
         return 0, 1
     try:
         conn = psycopg2.connect(DB_DSN)
+        conn.set_client_encoding('UTF8')
         cur = conn.cursor()
         for m in memories:
             if not isinstance(m, dict):
