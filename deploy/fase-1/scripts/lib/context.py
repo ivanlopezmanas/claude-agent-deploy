@@ -27,9 +27,14 @@ BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 CHAT_ID   = os.environ.get('TELEGRAM_CHAT_ID', '')
 
 MODEL_WINDOWS = {
-    'claude-opus-4':   1_000_000,
-    'claude-sonnet-4':   200_000,
-    'claude-haiku-4':    200_000,
+    'claude-fable-5':         1_000_000,
+    'claude-mythos-5':        1_000_000,
+    'claude-mythos-preview':  1_000_000,
+    'claude-opus-5':          1_000_000,
+    'claude-opus-4':          1_000_000,
+    'claude-sonnet-5':        1_000_000,
+    'claude-sonnet-4':        1_000_000,
+    'claude-haiku-4':           200_000,
 }
 
 TRANSCRIPT_GLOB = '/home/<agent>/claude/.claude/projects/-home-<agent>-claude/*.jsonl'

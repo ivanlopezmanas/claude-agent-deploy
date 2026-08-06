@@ -79,7 +79,7 @@ class TestContextLogging:
         assert not any(e["decision"] in ("sent", "send-failed") for e in entries)
 
     def test_above_threshold_logs_send_failed_without_credentials(self, monkeypatch, tmp_path):
-        tp = _write_transcript(tmp_path, [_usage_line(cache_read=70_000)])  # pct > 30
+        tp = _write_transcript(tmp_path, [_usage_line(cache_read=350_000)])  # pct > 30
         _run_context(monkeypatch, ["--mode", "hook", "--transcript", tp])
         entries = _read_log(tmp_path / "log.jsonl")
         failed = [e for e in entries if e["tool"] == "context" and e["decision"] == "send-failed"]
