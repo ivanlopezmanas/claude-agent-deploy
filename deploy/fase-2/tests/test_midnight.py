@@ -77,7 +77,7 @@ class TestLoadCalendarIds:
         cfg = tmp_path / "calendars.json"
         cfg.write_text(json.dumps({"calendars": [
             {"calendario": "personal", "descripcion": "Personal", "id": "primary"},
-            {"calendario": "silvia", "descripcion": "Silvia", "id": "xyz@group.calendar.google.com"},
+            {"calendario": "secundario", "descripcion": "Secundario", "id": "xyz@group.calendar.google.com"},
         ]}))
         monkeypatch.setattr(mn, "CALENDARS_CONFIG_PATH", str(cfg))
         assert mn.load_calendar_ids() == ["primary", "xyz@group.calendar.google.com"]
