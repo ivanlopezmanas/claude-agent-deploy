@@ -35,6 +35,17 @@ try:
 
     # 4. Reglas inviolables (deterministas, prevalecen sobre cualquier otra capa —
     #    aplican igual al hilo principal y a subagentes, sin excepción)
+    #
+    #    AskUserQuestion no tiene ruta de salida hacia el canal: Claude Code relaya
+    #    peticiones de PERMISO vía la capability 'claude/channel/permission' del
+    #    plugin, pero no existe protocolo equivalente para las preguntas del modelo
+    #    — el widget se pinta solo en la TUI. En el servicio (pty sin humano
+    #    delante) eso deja la sesión bloqueada esperando un teclado que nadie toca.
+    #    Pasó el 2026-07-28: 1h parada en un menú de 5 opciones que el usuario nunca vio.
+    if tool == "AskUserQuestion":
+        block("AskUserQuestion cuelga la sesión: el widget solo se renderiza en la "
+              "TUI y por el canal no llega nada. Manda las opciones numeradas con "
+              "mcp__plugin_telegram_telegram__reply y espera la respuesta.", tool=tool)
     if is_memory_path(path):
         block("La memoria vive en PostgreSQL, no en disco.", tool=tool)
     if is_dangerous_pipe(tool, args):
@@ -46,7 +57,7 @@ try:
 
     # 5. Subagentes: tabla de permisos por agent_type (agent-permissions.json),
     #    allow-only / default-deny. No cae al modelo de riesgo genérico de abajo
-    #    — ese es solo para el hilo principal (§ regla de Iván: settings.json
+    #    — ese es solo para el hilo principal (regla del propietario: settings.json
     #    sigue gobernando main, esta tabla es exclusiva de subagentes).
     if agent_type:
         if check_agent_policy(agent_type, tool, args):

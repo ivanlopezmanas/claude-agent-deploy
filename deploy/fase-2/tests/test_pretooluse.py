@@ -39,6 +39,27 @@ class TestInviolableRules:
         rc, out, _ = run_hook(SCRIPT, {"tool_name": "Agent", "tool_input": {"model": "opus", "description": "x"}})
         assert _decision(out) == "ask"
 
+    def test_askuserquestion_blocked(self, run_hook, main_ctx):
+        # El widget solo se pinta en la TUI: en el servicio deja la sesión colgada.
+        rc, out, _ = run_hook(SCRIPT, {"tool_name": "AskUserQuestion",
+                                       "tool_input": {"questions": [{"question": "¿x?", "header": "x",
+                                                                     "options": [{"label": "a", "description": "a"}]}]}})
+        assert _decision(out) == "deny"
+
+    def test_askuserquestion_blocked_in_subagent(self, run_hook, subagent_ctx):
+        # Regla inviolable: corre antes de la tabla por agent_type, así que ningún
+        # allow list de subagente la puede reabrir.
+        rc, out, _ = run_hook(SCRIPT, {"tool_name": "AskUserQuestion", "tool_input": {"questions": []},
+                                       "agent_type": "the-seeker"},
+                              env={"<AGENT>_CONTEXT": "subagent"})
+        assert _decision(out) == "deny"
+
+    def test_askuserquestion_reason_points_to_reply(self, run_hook, main_ctx):
+        # El bloqueo debe enseñar la alternativa, no solo cerrar la puerta.
+        rc, out, _ = run_hook(SCRIPT, {"tool_name": "AskUserQuestion", "tool_input": {"questions": []}})
+        reason = out.get("hookSpecificOutput", {}).get("permissionDecisionReason", "")
+        assert "reply" in reason
+
 
 class TestScoring:
     def test_tmp_write_allows(self, run_hook, main_ctx):
