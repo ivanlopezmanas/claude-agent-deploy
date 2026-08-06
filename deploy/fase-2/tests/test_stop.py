@@ -183,6 +183,33 @@ class TestStopGuards:
         assert out is None
         assert not (tmp_path / REWAKE).exists()
 
+    def test_flag_from_another_session_is_ignored(self, run_hook, tmp_path):
+        # La bandera y el contador viven en /tmp, compartidos por toda la máquina.
+        # Una sesión de terminal cerrando turno no debe gastar los reintentos de la
+        # sesión de Telegram ni acabar publicando su texto en el chat ajeno.
+        _write_flag(tmp_path, time.time())          # bandera de "s1"
+        tp = _write_transcript(tmp_path, [_tg_msg("pregunta"), _assistant_text("sin reply")])
+        rc, out, _ = run_hook(SCRIPT,
+                              {"stop_hook_active": False, "transcript_path": tp,
+                               "session_id": "otra-sesion"},
+                              env=_env(tmp_path))
+        assert rc == 0
+        assert out is None                          # no bloquea
+        assert not (tmp_path / REWAKE).exists()     # no toca el contador ajeno
+        assert (tmp_path / TURN_FLAG).exists()      # ni borra la bandera ajena
+
+    def test_own_session_still_blocks(self, run_hook, tmp_path):
+        # Contrapartida: con el session_id correcto la garantía sigue intacta.
+        _write_flag(tmp_path, time.time())          # bandera de "s1"
+        tp = _write_transcript(tmp_path, [_tg_msg("pregunta"), _assistant_text("sin reply")])
+        rc, out, _ = run_hook(SCRIPT,
+                              {"stop_hook_active": False, "transcript_path": tp,
+                               "session_id": "s1"},
+                              env=_env(tmp_path))
+        assert rc == 0
+        assert out.get("decision") == "block"
+        assert json.loads((tmp_path / REWAKE).read_text())["n"] == 1
+
     def test_malformed_input_fails_open(self, run_hook, tmp_path):
         import subprocess, sys, os
         proc = subprocess.run(

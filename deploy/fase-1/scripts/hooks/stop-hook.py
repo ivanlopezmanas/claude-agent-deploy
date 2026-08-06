@@ -145,6 +145,17 @@ try:
         sys.exit(0)
 
     session_id = data.get("session_id") or ""
+    # Guarda de propiedad: la bandera y el contador viven en /tmp, compartidos por
+    # todas las sesiones de la máquina. Una sesión de terminal que cierre turno
+    # mientras la del servicio tiene un turno abierto veía la bandera ajena como
+    # propia: gastaba sus reintentos y, al agotarlos, el rescate publicaba en el
+    # chat de Telegram el texto de OTRA conversación. La bandera ya trae de quién
+    # es — basta con mirarlo. Si falta cualquiera de los dos identificadores no se
+    # puede decidir la propiedad: se mantiene el comportamiento anterior (exigir
+    # reply), que falla del lado de garantizar la respuesta.
+    if session_id and flag.get("session") and flag["session"] != session_id:
+        sys.exit(0)
+
     transcript_path = data.get("transcript_path") or ""
     reply_ok, last_assistant_text = check_reply_status(transcript_path)
 
