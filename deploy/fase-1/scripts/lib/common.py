@@ -207,7 +207,7 @@ def call_isolated_agent(prompt: str, *, agent: str = None, model: str = None,
     FAIL-OPEN: cualquier fallo (timeout, exit != 0, excepción) devuelve None,
     nunca propaga. El caller decide qué hacer con un resultado vacío.
     """
-    cmd = ["claude", "--print", "--strict-mcp-config", "--settings", str(SETTINGS_BACKGROUND)]
+    cmd = ["/home/<agent>/claude/.local/bin/claude", "--print", "--strict-mcp-config", "--settings", str(SETTINGS_BACKGROUND)]
     if agent:
         cmd += ["--agent", agent]
     if model:
@@ -222,13 +222,25 @@ def call_isolated_agent(prompt: str, *, agent: str = None, model: str = None,
         cmd += ["--output-format", output_format]
     env = dict(os.environ)
     env["<AGENT>_CONTEXT"] = "subagent"
+    who = agent or model or "sin-agente"
     try:
         result = subprocess.run(cmd, input=prompt, capture_output=True, text=True,
                                  timeout=timeout, env=env)
         if result.returncode != 0:
+            # FAIL-OPEN pero no ciego: el caller sigue recibiendo None, pero el
+            # motivo queda registrado. Sin esto el chronicler estuvo roto en 8
+            # cierres de sesión seguidos y el log solo sabía decir "devolvió None"
+            # (2026-07-28). rc negativo = muerto por señal: -15 es SIGTERM.
+            rc = result.returncode
+            sig = f" (muerto por SIG{-rc})" if rc < 0 else ""
+            log_permission("call_isolated_agent", "subagent-failed",
+                           f"agent={who} rc={rc}{sig} "
+                           f"stderr={(result.stderr or '').strip()[-400:] or '(vacío)'}")
             return None
         return result.stdout.strip()
-    except Exception:
+    except Exception as e:
+        log_permission("call_isolated_agent", "subagent-error",
+                       f"agent={who} {type(e).__name__}: {e}")
         return None
 
 # ---------------------------------------------------------------- I/O hook

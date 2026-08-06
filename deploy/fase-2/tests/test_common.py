@@ -48,7 +48,7 @@ class TestCallIsolatedAgent:
         result = nc.call_isolated_agent("hola", model="haiku")
 
         assert result == "hola"
-        assert captured["cmd"][:4] == ["claude", "--print", "--strict-mcp-config", "--settings"]
+        assert captured["cmd"][:4] == ["/home/<agent>/claude/.local/bin/claude", "--print", "--strict-mcp-config", "--settings"]
         assert "--model" in captured["cmd"] and "haiku" in captured["cmd"]
         assert captured["env"]["<AGENT>_CONTEXT"] == "subagent"
 
@@ -150,6 +150,72 @@ class TestLookupTier:
 
     def test_docs_t1(self):
         assert nc.lookup_tier("/home/<agent>/workspace/docs/tareas/x.md") == "T1"
+
+    def test_channel_inbox_is_readable(self):
+        # El inbox del canal es una excepción al never de .claude/: sin esto el
+        # agente no puede leer las fotos que le manda el usuario (bloqueo real
+        # del 2026-07-28).
+        assert nc.lookup_tier(
+            "/home/<agent>/claude/.claude/channels/telegram/inbox/1785223870240-AQADFA.jpg") == "T1"
+
+    def test_channel_state_outside_inbox_stays_never(self):
+        # access.json (allowlist de pairings) y bot.pid son hermanos del inbox y
+        # NO se abren: aprobar accesos es regla inviolable.
+        assert nc.lookup_tier("/home/<agent>/claude/.claude/channels/telegram/access.json") == "never"
+        assert nc.lookup_tier("/home/<agent>/claude/.claude/channels/telegram/bot.pid") == "never"
+        assert nc.lookup_tier("/home/<agent>/claude/.claude/channels/telegram/") == "never"
+
+
+# ----------------------------------------------------------------- call_isolated_agent()
+class TestIsolatedAgentLogging:
+    """El fail-open no debe ser ciego: cada None tiene que dejar el motivo.
+
+    Sin esto, el chronicler falló en 8 cierres de sesión seguidos y el log solo
+    podía decir "devolvió None" (incidente 2026-07-28).
+    """
+
+    class _Fake:
+        def __init__(self, rc, stderr=""):
+            self.returncode, self.stderr, self.stdout = rc, stderr, ""
+
+    def test_signal_death_is_logged(self, monkeypatch):
+        captured = []
+        monkeypatch.setattr(nc, "log_permission", lambda t, d, r="": captured.append((t, d, r)))
+        monkeypatch.setattr(nc.subprocess, "run", lambda *a, **k: self._Fake(-15))
+        assert nc.call_isolated_agent("x", agent="the-chronicler") is None
+        assert len(captured) == 1
+        tool, decision, reason = captured[0]
+        assert decision == "subagent-failed"
+        assert "rc=-15" in reason and "SIG15" in reason
+        assert "the-chronicler" in reason
+
+    def test_stderr_is_logged(self, monkeypatch):
+        captured = []
+        monkeypatch.setattr(nc, "log_permission", lambda t, d, r="": captured.append((t, d, r)))
+        monkeypatch.setattr(nc.subprocess, "run", lambda *a, **k: self._Fake(1, "su: unrecognized option"))
+        assert nc.call_isolated_agent("x", agent="the-chronicler") is None
+        assert "su: unrecognized option" in captured[0][2]
+
+    def test_exception_is_logged(self, monkeypatch):
+        captured = []
+        monkeypatch.setattr(nc, "log_permission", lambda t, d, r="": captured.append((t, d, r)))
+
+        def boom(*a, **k):
+            raise FileNotFoundError("no such file: claude")
+
+        monkeypatch.setattr(nc.subprocess, "run", boom)
+        assert nc.call_isolated_agent("x", agent="the-chronicler") is None
+        assert captured[0][1] == "subagent-error"
+        assert "FileNotFoundError" in captured[0][2]
+
+    def test_success_logs_nothing(self, monkeypatch):
+        captured = []
+        monkeypatch.setattr(nc, "log_permission", lambda t, d, r="": captured.append((t, d, r)))
+        ok = self._Fake(0)
+        ok.stdout = "  []  "
+        monkeypatch.setattr(nc.subprocess, "run", lambda *a, **k: ok)
+        assert nc.call_isolated_agent("x", agent="the-chronicler") == "[]"
+        assert captured == []
 
 
 # ----------------------------------------------------------------- score_tool_call()
