@@ -64,6 +64,7 @@ KEY_TO_PLACEHOLDER = {
         "agent", "Agent", "AGENT", "vmid", "ip_address", "hostname",
         "owner_name", "profession", "family", "tech_level", "use_cases",
         "tone_style", "language_preference", "owner_profile_description",
+        "owner_timezone",
     )
 }
 
