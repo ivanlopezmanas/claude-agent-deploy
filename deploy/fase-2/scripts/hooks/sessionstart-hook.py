@@ -20,6 +20,7 @@ from pathlib import Path
 
 CLAUDE_MD       = Path("/home/<agent>/claude/CLAUDE.md")
 GREETING_SCRIPT = "/home/<agent>/workspace/scripts/lib/greeting.py"
+TELEGRAM_SESSION_FILE = "/home/<agent>/data/telegram-session.json"
 
 ONBOARDING_CONTEXT = (
     "PRIMER ARRANQUE — ONBOARDING OBLIGATORIO\n\n"
@@ -77,6 +78,19 @@ try:
 
     # 1. Log de inicio de sesión.
     log_permission("SessionStart", "session-start", source)
+
+    # 1b. Si esta sesión es el servicio de Telegram (marca puesta por
+    # claude-telegram-start.sh, no presente en un terminal manual), volcar su
+    # identidad para que manual_reset.py pueda localizarla sin heurísticas.
+    if os.environ.get("<AGENT>_SERVICE") == "telegram":
+        try:
+            with open(TELEGRAM_SESSION_FILE, "w") as f:
+                json.dump({
+                    "session_id": data.get("session_id") or "",
+                    "transcript_path": data.get("transcript_path") or "",
+                }, f)
+        except Exception:
+            pass
 
     # 2. Limpia banderas huérfanas de sesiones anteriores.
     for flag in ORPHAN_FLAGS:
