@@ -2,22 +2,28 @@
 # chmod +x /home/<agent>/workspace/scripts/hooks/sessionend-hook.py
 """sessionend-hook.py — SessionEnd.
 
-1. Llama a chronicler.py pasándole el hook input (memorias + notificación de cierre).
-2. Envía a Telegram un bloque de código con `/resume_{session_id}` para retomar
-   la sesión: no es un comando real de Telegram (un UUID supera el límite de
-   32 caracteres de un bot_command), es texto en formato `code` que el usuario
-   copia y pega. Sin límite de longitud, sin truncar el session_id.
+Envía a Telegram un bloque de código con `/resume_{session_id}` para retomar
+la sesión: no es un comando real de Telegram (un UUID supera el límite de
+32 caracteres de un bot_command), es texto en formato `code` que el usuario
+copia y pega. Sin límite de longitud, sin truncar el session_id.
+
+YA NO LLAMA AL CHRONICLER (incidente 2026-07-28). Aquí no se puede: este hook
+corre mientras el proceso muere, y con `KillMode=control-group` systemd derriba
+todo el cgroup, así que el `claude --print` del chronicler moría en ~250ms sin
+escribir nada. Ocho cierres de sesión, cero memorias. El guardado se hace ahora
+ANTES del reinicio, en reset_sequence.py, invocado desde el /reset.
+
+Consecuencia asumida: un cierre que NO venga de un /reset (salir de una sesión
+de terminal, un `systemctl restart` a mano, un crash) no guarda memoria. Antes
+tampoco lo hacía — solo que fallaba en silencio.
 
 Guards: solo contexto main, sin subagentes (sdk-cli), sin reentradas.
 """
 import json
 import os
-import subprocess
 import sys
 import urllib.parse
 import urllib.request
-
-CHRONICLER = "/home/<agent>/workspace/scripts/lib/chronicler.py"
 
 
 def tg_send(token, chat_id, text, parse_mode=None):
@@ -54,18 +60,7 @@ def main():
 
     session_id = data.get("session_id", "")
 
-    # 1. Llama a chronicler.py con el mismo hook input.
-    try:
-        subprocess.run(
-            [sys.executable, CHRONICLER],
-            input=raw,
-            text=True,
-            timeout=180,
-        )
-    except Exception:
-        pass
-
-    # 2. Envía el código para retomar, como bloque `code` (copiar y pegar).
+    # Envía el código para retomar, como bloque `code` (copiar y pegar).
     if session_id:
         bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
         chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
