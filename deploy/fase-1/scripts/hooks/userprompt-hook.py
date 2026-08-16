@@ -28,6 +28,10 @@ SKILLS_DIR     = "/home/<agent>/claude/.claude/skills"
 AGENTS_DIR     = "/home/<agent>/claude/.claude/agents"
 TICKER_SCRIPT  = "/home/<agent>/workspace/scripts/lib/ticker.py"
 CONTEXT_SCRIPT = "/home/<agent>/workspace/scripts/lib/context.py"
+# Override solo para test (patrón de <AGENT>_TMP_OVERRIDE): sin él, un test del
+# comando /reset ejecutaría la secuencia de guardado real.
+RESET_SEQUENCE_SCRIPT = os.environ.get(
+    "<AGENT>_RESET_SEQUENCE_OVERRIDE", "/home/<agent>/workspace/scripts/lib/reset_sequence.py")
 
 ACCESS_PATTERNS = (
     "aprueba", "aprobar", "pairing", "empareja", "allowlist",
@@ -117,20 +121,44 @@ def intercept_command(prompt: str, data: dict):
         _respond_and_stop(body)
         return True
     if _command_matches(cmd, "/reset"):
-        _handle_reset()
+        _handle_reset(data)
         return True
     return False
 
 
-def _handle_reset() -> None:
-    _tg_send("Reiniciando...")
-    subprocess.Popen(
-        ["systemctl", "restart", "<agent>-claude.service"],
-        start_new_session=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+def _handle_reset(data: dict) -> None:
+    """Guarda la memoria de la sesión ANTES de reiniciar (incidente 2026-07-28).
+
+    El reinicio ya no se lanza aquí: lo hace reset_sequence.py cuando el
+    chronicler ha terminado. Antes se reiniciaba de inmediato y el chronicler,
+    que corre en el SessionEnd, moría con el cgroup sin escribir nada.
+
+    El session_id y el transcript vienen en el input de este hook, así que no
+    hay que adivinar de qué sesión hablamos ni traspasar nada a la siguiente.
+    """
+    session_id = data.get("session_id") or ""
+    transcript = data.get("transcript_path") or ""
+    _tg_send("Guardando memoria antes de reiniciar…")
+    try:
+        subprocess.Popen(
+            [sys.executable, RESET_SEQUENCE_SCRIPT, session_id, transcript],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        # El /reset NUNCA puede quedarse sin efecto: es la vía de escape del
+        # usuario cuando algo está colgado. Si la secuencia no arranca, se
+        # reinicia directo y se pierde la memoria de esta sesión.
+        _tg_send("No pude lanzar el guardado de memoria. Reinicio directo.")
+        subprocess.Popen(
+            ["sudo", "systemctl", "restart", "claude-telegram.service"],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
     print(json.dumps({"continue": False}, ensure_ascii=False))
     sys.exit(0)
 
